@@ -1,0 +1,42 @@
+{
+  "name": "project-progress-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:web\"",
+    "dev:server": "npm run build:server && node server/dist/app.js",
+    "dev:web": "vite --config web/vite.config.ts --host 127.0.0.1",
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "tsc -p server/tsconfig.json",
+    "build:web": "tsc -p web/tsconfig.json && vite build --config web/vite.config.ts",
+    "start": "node server/dist/app.js",
+    "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.3.7",
+    "@fastify/cors": "^9.0.1",
+    "@fastify/multipart": "^8.3.0",
+    "@tanstack/react-query": "^5.45.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "antd": "^5.18.3",
+    "better-sqlite3": "^11.1.2",
+    "concurrently": "^8.2.2",
+    "dayjs": "^1.11.11",
+    "exceljs": "^4.4.0",
+    "fastify": "^4.28.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.24.0",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.2",
+    "vite": "^5.3.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.10",
+    "@types/node": "^20.14.9",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0"
+  }
+}
