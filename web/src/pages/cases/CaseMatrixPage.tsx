@@ -3,12 +3,16 @@ import { Button, Card, Select, Space, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { TaskDrawer } from '../../components/drawers/TaskDrawer';
 import { ProgressCell } from '../../components/matrix/ProgressCell';
 import { fetchCaseMatrix, fetchCases } from '../../services/cases';
 import type { MatrixColumn, MatrixRow, ProjectCase } from '../../types';
+import { statusColor, statusLabel } from '../../utils/labels';
 
 export function CaseMatrixPage() {
+  const [searchParams] = useSearchParams();
+  const caseIdFromQuery = searchParams.get('caseId') ?? undefined;
   const [selectedCaseId, setSelectedCaseId] = useState<string>();
   const [openedTaskId, setOpenedTaskId] = useState<string>();
 
@@ -18,7 +22,7 @@ export function CaseMatrixPage() {
   });
 
   const cases = casesQuery.data ?? [];
-  const activeCaseId = selectedCaseId ?? cases[0]?.id;
+  const activeCaseId = selectedCaseId ?? caseIdFromQuery ?? cases[0]?.id;
 
   const matrixQuery = useQuery({
     queryKey: ['matrix', activeCaseId],
@@ -51,8 +55,8 @@ export function CaseMatrixPage() {
           </Button>
           {matrixQuery.data?.projectCase && (
             <>
-              <Tag color={matrixQuery.data.projectCase.status === 'completed' ? 'green' : 'blue'}>
-                {matrixQuery.data.projectCase.status}
+              <Tag color={statusColor(matrixQuery.data.projectCase.status)}>
+                {statusLabel(matrixQuery.data.projectCase.status)}
               </Tag>
               <Typography.Text type="secondary">
                 总进度 {Math.round(matrixQuery.data.projectCase.total_progress)}%

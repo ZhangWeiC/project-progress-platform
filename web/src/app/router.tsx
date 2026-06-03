@@ -1,5 +1,6 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { AppShell } from '../components/common/AppShell';
+import { DashboardPage } from '../pages/dashboard/DashboardPage';
 import { CaseMatrixPage } from '../pages/cases/CaseMatrixPage';
 import { WorkLogsPage } from '../pages/work-logs/WorkLogsPage';
 import { ExceptionsPage } from '../pages/exceptions/ExceptionsPage';
@@ -18,7 +19,8 @@ export const router = createBrowserRouter([
     path: '/',
     element: <AppShell />,
     children: [
-      { index: true, element: <Navigate to="/cases" replace /> },
+      { index: true, element: <Navigate to="/dashboard" replace /> },
+      { path: 'dashboard', element: <DashboardPage /> },
       { path: 'cases', element: <CaseMatrixPage /> },
       { path: 'work-logs', element: <WorkLogsPage /> },
       { path: 'exceptions', element: <ExceptionsPage /> },

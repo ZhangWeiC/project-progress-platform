@@ -1,4 +1,4 @@
-import { AppstoreOutlined, BarChartOutlined, ExceptionOutlined, FileExcelOutlined, FormOutlined, SettingOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, BarChartOutlined, DashboardOutlined, ExceptionOutlined, FileExcelOutlined, FormOutlined, SettingOutlined } from '@ant-design/icons';
 import { Layout, Menu, Select, Space, Typography } from 'antd';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { getCurrentUserId, setCurrentUserId } from '../../services/api';
@@ -6,18 +6,19 @@ import { getCurrentUserId, setCurrentUserId } from '../../services/api';
 const { Header, Sider, Content } = Layout;
 
 const menuItems = [
-  { key: '/cases', icon: <AppstoreOutlined />, label: '项目进度' },
+  { key: '/dashboard', icon: <DashboardOutlined />, label: '业务工作台' },
+  { key: '/cases', icon: <AppstoreOutlined />, label: '进度总表' },
   { key: '/work-logs', icon: <FormOutlined />, label: '日报工时' },
-  { key: '/exceptions', icon: <ExceptionOutlined />, label: '异常情况' },
-  { key: '/imports', icon: <FileExcelOutlined />, label: '导入中心' },
-  { key: '/reports', icon: <BarChartOutlined />, label: '统计报表' },
+  { key: '/exceptions', icon: <ExceptionOutlined />, label: '异常协同' },
+  { key: '/imports', icon: <FileExcelOutlined />, label: 'Excel 导入' },
+  { key: '/reports', icon: <BarChartOutlined />, label: '统计月报' },
   { key: '/settings/templates', icon: <SettingOutlined />, label: '后台配置' }
 ];
 
 export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const selectedKey = menuItems.find((item) => location.pathname.startsWith(item.key))?.key ?? '/cases';
+  const selectedKey = menuItems.find((item) => location.pathname.startsWith(item.key))?.key ?? '/dashboard';
 
   return (
     <Layout className="app-shell">

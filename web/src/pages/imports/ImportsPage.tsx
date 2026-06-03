@@ -1,11 +1,29 @@
-import { Card, Steps, Table, Typography } from 'antd';
+import { UploadOutlined } from '@ant-design/icons';
+import { Button, Card, Space, Steps, Table, Typography, Upload } from 'antd';
+import { useState } from 'react';
 
 export function ImportsPage() {
+  const [fileName, setFileName] = useState<string>();
+
   return (
-    <Card>
-      <Typography.Title level={4}>Excel 导入中心</Typography.Title>
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <div className="page-title-row">
+        <Typography.Title level={4} style={{ margin: 0 }}>Excel 导入</Typography.Title>
+        <Upload
+          accept=".xlsx,.xls"
+          maxCount={1}
+          showUploadList={false}
+          beforeUpload={(file) => {
+            setFileName(file.name);
+            return false;
+          }}
+        >
+          <Button icon={<UploadOutlined />} type="primary">选择项目进度表</Button>
+        </Upload>
+      </div>
+      <Card>
       <Steps
-        current={1}
+        current={fileName ? 1 : 0}
         items={[
           { title: '上传 Excel' },
           { title: '预览与异常确认' },
@@ -22,7 +40,7 @@ export function ImportsPage() {
             source_column: 'V',
             field_name: '单片体焊接/完成率%',
             raw_value: '6.66',
-            issue_type: 'progress_out_of_range',
+            issue_type: '进度数值需确认',
             suggestion: '请确认是 6.66%、66.6% 还是录入错误'
           }
         ]}
@@ -35,6 +53,7 @@ export function ImportsPage() {
           { title: '建议', dataIndex: 'suggestion' }
         ]}
       />
-    </Card>
+      </Card>
+    </Space>
   );
 }

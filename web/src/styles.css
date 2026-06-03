@@ -46,6 +46,13 @@ body {
   border-radius: 6px;
 }
 
+.page-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .matrix-card {
   border-radius: 6px;
 }
@@ -140,5 +147,10 @@ body {
 
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .page-title-row {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

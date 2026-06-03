@@ -2,6 +2,7 @@ import { Button, Card, Progress, Space, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { fetchMyTasks } from '../../services/cases';
+import { statusColor, statusLabel } from '../../utils/labels';
 
 export function MobileTaskListPage() {
   const navigate = useNavigate();
@@ -13,7 +14,7 @@ export function MobileTaskListPage() {
         <Card key={String(task.id)} size="small" className="mobile-card">
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
             <Space>
-              <Tag color={task.status === 'completed' ? 'green' : 'blue'}>{String(task.status)}</Tag>
+              <Tag color={statusColor(task.status)}>{statusLabel(task.status)}</Tag>
               <Typography.Text strong>{String(task.name)}</Typography.Text>
             </Space>
             <Typography.Text type="secondary">{String(task.case_name)} / {String(task.item_name ?? '-')}</Typography.Text>

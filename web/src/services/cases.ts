@@ -1,5 +1,5 @@
 import { apiGet, apiPatch, apiPost } from './api';
-import type { ExceptionRecord, LookupResponse, MatrixResponse, ProjectCase, TaskDetails, WorkLogEntry } from '../types';
+import type { ExceptionRecord, LookupResponse, MatrixResponse, ProjectCase, TaskDetails, WorkbenchResponse, WorkbenchTask, WorkLogEntry } from '../types';
 
 export const fetchCases = () => apiGet<ProjectCase[]>('/api/cases');
 
@@ -29,13 +29,8 @@ export const patchException = (exceptionId: string, payload: Record<string, unkn
   apiPatch<{ ok: boolean }>(`/api/exceptions/${exceptionId}`, payload);
 
 export const fetchWorkbench = () =>
-  apiGet<{
-    user: { id: string; name: string; role: string };
-    counts: { tasks: number; exceptions: number; overdue: number };
-    tasks: Array<Record<string, unknown>>;
-    exceptions: Array<Record<string, unknown>>;
-  }>('/api/me/workbench');
+  apiGet<WorkbenchResponse>('/api/me/workbench');
 
-export const fetchMyTasks = () => apiGet<Array<Record<string, unknown>>>('/api/me/tasks');
+export const fetchMyTasks = () => apiGet<WorkbenchTask[]>('/api/me/tasks');
 
 export const fetchMyExceptions = () => apiGet<ExceptionRecord[]>('/api/me/exceptions');

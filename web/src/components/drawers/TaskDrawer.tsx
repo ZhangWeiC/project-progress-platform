@@ -2,6 +2,7 @@ import { Alert, Button, Descriptions, Drawer, Empty, Form, InputNumber, List, Pr
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchTaskDetails, updateSubtaskProgress } from '../../services/cases';
 import type { CaseSubTask } from '../../types';
+import { statusColor, statusLabel } from '../../utils/labels';
 
 type Props = {
   taskId?: string;
@@ -104,7 +105,7 @@ export function TaskDrawer({ taskId, open, onClose, matrixCaseId }: Props) {
                   <List.Item>
                     <Space direction="vertical" size={2}>
                       <Space>
-                        <Tag color={item.status === 'open' ? 'red' : 'blue'}>{item.status}</Tag>
+                        <Tag color={statusColor(item.status)}>{statusLabel(item.status)}</Tag>
                         <Typography.Text strong>{item.title}</Typography.Text>
                       </Space>
                       <Typography.Text type="secondary">

@@ -1,6 +1,7 @@
 import { Button, Card, Form, Input, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createException, fetchExceptions, fetchLookups, fetchMyTasks, patchException } from '../../services/cases';
+import { statusColor, statusLabel } from '../../utils/labels';
 
 export function ExceptionsPage() {
   const queryClient = useQueryClient();
@@ -81,7 +82,7 @@ export function ExceptionsPage() {
           size="small"
           dataSource={exceptions.data ?? []}
           columns={[
-            { title: '状态', dataIndex: 'status', width: 100, render: (value) => <Tag color={value === 'open' ? 'red' : 'blue'}>{value}</Tag> },
+            { title: '状态', dataIndex: 'status', width: 100, render: (value) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
             { title: '标题', dataIndex: 'title' },
             { title: '项目', dataIndex: 'case_name' },
             { title: '任务', dataIndex: 'task_name' },

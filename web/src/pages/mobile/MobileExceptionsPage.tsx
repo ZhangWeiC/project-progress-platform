@@ -1,6 +1,7 @@
 import { Button, Card, Space, Tag, Typography, message } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchMyExceptions, patchException } from '../../services/cases';
+import { statusColor, statusLabel } from '../../utils/labels';
 
 export function MobileExceptionsPage() {
   const queryClient = useQueryClient();
@@ -20,7 +21,7 @@ export function MobileExceptionsPage() {
         <Card key={item.id} size="small" className="mobile-card">
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
             <Space>
-              <Tag color="red">{item.status}</Tag>
+              <Tag color={statusColor(item.status)}>{statusLabel(item.status)}</Tag>
               <Typography.Text strong>{item.title}</Typography.Text>
             </Space>
             <Typography.Text type="secondary">{item.case_name} / {item.item_name ?? '-'} / {item.task_name ?? '-'}</Typography.Text>

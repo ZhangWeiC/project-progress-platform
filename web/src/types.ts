@@ -126,3 +126,14 @@ export type LookupResponse = {
   departments: Array<{ id: string; name: string }>;
   teams: Array<{ id: string; name: string; leader_id?: string }>;
 };
+
+export type WorkbenchTask = CaseTask & {
+  is_delayed?: number | boolean | null;
+};
+
+export type WorkbenchResponse = {
+  user: { id: string; name: string; role: string };
+  counts: { tasks: number; exceptions: number; overdue: number };
+  tasks: WorkbenchTask[];
+  exceptions: ExceptionRecord[];
+};
