@@ -6,7 +6,9 @@ const STATUS_LABELS: Record<string, string> = {
   resolved: '已解决',
   closed: '已关闭',
   cancelled: '已取消',
-  submitted: '已提交'
+  submitted: '已提交',
+  preview_ready: '待确认入库',
+  confirmed: '已入库'
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -17,7 +19,9 @@ const STATUS_COLORS: Record<string, string> = {
   resolved: 'green',
   closed: 'default',
   cancelled: 'default',
-  submitted: 'blue'
+  submitted: 'blue',
+  preview_ready: 'orange',
+  confirmed: 'green'
 };
 
 export function statusLabel(status?: string | null) {

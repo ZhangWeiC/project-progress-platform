@@ -1,5 +1,5 @@
-import { apiGet, apiPatch, apiPost } from './api';
-import type { ExceptionRecord, LookupResponse, MatrixResponse, ProjectCase, TaskDetails, WorkbenchResponse, WorkbenchTask, WorkLogEntry } from '../types';
+import { apiGet, apiPatch, apiPost, apiUpload } from './api';
+import type { ExceptionRecord, ImportTaskPreview, LookupResponse, MatrixResponse, ProjectCase, TaskDetails, WorkbenchResponse, WorkbenchTask, WorkLogEntry } from '../types';
 
 export const fetchCases = () => apiGet<ProjectCase[]>('/api/cases');
 
@@ -34,3 +34,15 @@ export const fetchWorkbench = () =>
 export const fetchMyTasks = () => apiGet<WorkbenchTask[]>('/api/me/tasks');
 
 export const fetchMyExceptions = () => apiGet<ExceptionRecord[]>('/api/me/exceptions');
+
+export const uploadImportTask = (file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return apiUpload<ImportTaskPreview>('/api/import-tasks', formData);
+};
+
+export const fetchImportPreview = (importTaskId: string) =>
+  apiGet<ImportTaskPreview>(`/api/import-tasks/${importTaskId}/preview`);
+
+export const confirmImportTask = (importTaskId: string) =>
+  apiPost<{ ok: boolean; imported_cases: number; imported_items: number }>(`/api/import-tasks/${importTaskId}/confirm`, {});

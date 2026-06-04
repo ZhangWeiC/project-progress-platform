@@ -137,3 +137,35 @@ export type WorkbenchResponse = {
   tasks: WorkbenchTask[];
   exceptions: ExceptionRecord[];
 };
+
+export type ImportIssue = {
+  source_sheet: string;
+  source_row: number;
+  source_column: string;
+  field_name: string;
+  raw_value: string;
+  issue_type: string;
+  suggestion: string;
+};
+
+export type ImportPreviewRow = {
+  source_row: number;
+  project_name: string;
+  item_name: string;
+  item_progress: number;
+  delivery_date: string;
+  delivery_status: string;
+};
+
+export type ImportTaskPreview = {
+  id: string;
+  file_name: string;
+  status: string;
+  source_sheet: string;
+  total_rows: number;
+  parsed_cases: number;
+  parsed_items: number;
+  issue_count: number;
+  preview_rows: ImportPreviewRow[];
+  issues: ImportIssue[];
+};

@@ -256,6 +256,22 @@ export function initializeDatabase() {
       FOREIGN KEY (author_id) REFERENCES employee(id)
     );
 
+    CREATE TABLE IF NOT EXISTS import_task (
+      id TEXT PRIMARY KEY,
+      file_name TEXT NOT NULL,
+      status TEXT NOT NULL,
+      source_sheet TEXT,
+      total_rows INTEGER NOT NULL DEFAULT 0,
+      parsed_cases INTEGER NOT NULL DEFAULT 0,
+      parsed_items INTEGER NOT NULL DEFAULT 0,
+      issue_count INTEGER NOT NULL DEFAULT 0,
+      payload_json TEXT NOT NULL,
+      issues_json TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      confirmed_at TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_item_case ON case_item(project_case_id);
     CREATE INDEX IF NOT EXISTS idx_task_case ON case_task(project_case_id);
     CREATE INDEX IF NOT EXISTS idx_task_item ON case_task(case_item_id);

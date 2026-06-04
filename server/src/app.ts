@@ -4,6 +4,7 @@ import Fastify from 'fastify';
 import { z } from 'zod';
 import { db, initializeDatabase, makeId, nowIso } from './db.js';
 import { getCurrentUser, getMatrix, getTaskDetails, updateProgress, assertCanReadCase } from './services.js';
+import { confirmExcelImport, createExcelImport, getImportPreview } from './importer.js';
 
 initializeDatabase();
 
@@ -368,33 +369,28 @@ app.get('/api/views', async () => {
   ];
 });
 
-app.post('/api/import-tasks', async () => {
-  return {
-    id: makeId('IMPORT'),
-    status: 'preview_ready',
-    message: 'MVP 当前提供样例数据，后续接入 ExcelJS 解析上传文件。'
-  };
+app.post('/api/import-tasks', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const file = await request.file();
+  if (!file) {
+    const err = new Error('请选择要导入的 Excel 文件');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+  const buffer = await file.toBuffer();
+  return createExcelImport(buffer, file.filename, user.id);
 });
 
 app.get('/api/import-tasks/:id/preview', async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
-  return {
-    id,
-    issues: [
-      {
-        source_sheet: '总表',
-        source_row: 27,
-        source_column: 'V',
-        field_name: '单片体焊接/完成率%',
-        raw_value: '6.66',
-        issue_type: 'progress_out_of_range',
-        suggestion: '请确认是 6.66%、66.6% 还是录入错误'
-      }
-    ]
-  };
+  return getImportPreview(id);
 });
 
-app.post('/api/import-tasks/:id/confirm', async () => ({ ok: true }));
+app.post('/api/import-tasks/:id/confirm', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  return confirmExcelImport(id, user.id);
+});
 
 type WorkbenchTask = {
   is_delayed: number | boolean | null;

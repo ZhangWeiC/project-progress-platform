@@ -29,6 +29,17 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return parseResponse<T>(response);
 }
 
+export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: {
+      'x-user-id': getCurrentUserId()
+    },
+    body: formData
+  });
+  return parseResponse<T>(response);
+}
+
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(path, {
     method: 'PATCH',
