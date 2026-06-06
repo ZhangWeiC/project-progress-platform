@@ -369,6 +369,35 @@ app.get('/api/views', async () => {
   ];
 });
 
+app.get('/api/workflow-template', async () => {
+  const template = db.prepare("SELECT * FROM case_template WHERE status = 'active' ORDER BY is_default DESC LIMIT 1").get() as
+    | { id: string; name: string; version: string; status: string; description: string | null }
+    | undefined;
+  if (!template) {
+    const err = new Error('未配置启用中的项目流程模板');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+  const stages = db
+    .prepare(
+      `SELECT tt.*, d.name as owner_department_name
+       FROM task_template tt
+       LEFT JOIN department d ON d.id = tt.default_owner_department_id
+       WHERE tt.case_template_id = ?
+       ORDER BY tt.sort_order`
+    )
+    .all(template.id) as Array<Record<string, unknown> & { id: string }>;
+  const subtasks = db
+    .prepare('SELECT * FROM subtask_template WHERE task_template_id = ? ORDER BY sort_order');
+  return {
+    ...template,
+    stages: stages.map((stage) => ({
+      ...stage,
+      subprocesses: subtasks.all(stage.id)
+    }))
+  };
+});
+
 app.post('/api/import-tasks', async (request) => {
   const user = getCurrentUser(request.headers);
   const file = await request.file();

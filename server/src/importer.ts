@@ -247,7 +247,10 @@ function parseMainSheet(worksheet: ExcelJS.Worksheet, fileName: string, issues: 
   }
 
   for (const project of projects.values()) {
-    project.totalProgress = average(project.items.map((item) => item.progress));
+    const designProgress = average([project.designOwnerName ? 100 : 0, project.drawingReviewProgress ?? 0]);
+    project.totalProgress = average(
+      project.items.map((item) => average([designProgress, ...item.tasks.map(taskProgress)]))
+    );
   }
 
   return {
@@ -276,12 +279,14 @@ function parseItem(row: ExcelJS.Row, rowNumber: number, sheetName: string, issue
     subtask('st-profile-machine', '型材机加工', progressColumns.profileMachine)
   ]);
   const productionTeamName = cellText(row.getCell(20).value);
-  const productionTask = task('tt-production', 'production', '装焊生产', 'dept-production', '', productionTeamName, [
+  const productionTask = task('tt-production', 'production', '装焊', 'dept-production', '', productionTeamName, [
     subtask('st-assembly', '单片体拼装', progressColumns.assembly),
     subtask('st-welding', '单片体焊接', progressColumns.welding),
     subtask('st-cleaning', '单片体清磨', progressColumns.cleaning),
-    subtask('st-preassembly', '预拼装、校正', progressColumns.preassembly),
-    subtask('st-painting', '喷涂', progressColumns.painting)
+    subtask('st-preassembly', '预拼装、校正', progressColumns.preassembly)
+  ]);
+  const paintingTask = task('tt-painting', 'painting', '喷涂', 'dept-production', '', productionTeamName, [
+    subtask('st-painting', '喷涂作业', progressColumns.painting)
   ]);
   const inspectionTask = task('tt-inspection', 'inspection', '验收', 'dept-quality', cellText(row.getCell(26).value), undefined, [
     subtask('st-self-check', '自检', progressColumns.selfCheck),
@@ -289,10 +294,14 @@ function parseItem(row: ExcelJS.Row, rowNumber: number, sheetName: string, issue
     subtask('st-special-check', '专检', progressColumns.specialCheck)
   ]);
 
-  const tasks = [materialTask, cuttingTask, productionTask, inspectionTask];
-  const progress = average(tasks.flatMap((itemTask) => itemTask.subtasks).map((itemSubtask) => itemSubtask.progress).filter((value): value is number => value !== null));
   const deliveryDate = normalizeDate(row.getCell(30).value);
   const deliveryStatus = cellText(row.getCell(31).value).trim();
+  const deliveryTask = task('tt-delivery', 'delivery', '发货', 'dept-delivery', '', undefined, [
+    manualSubtask('st-delivery-plan', '发货计划', 'AD', deliveryDate ? 100 : 0, deliveryDate),
+    manualSubtask('st-delivery-execute', '发货执行', 'AE', deliveryExecutionProgress(deliveryStatus), deliveryStatus)
+  ]);
+  const tasks = [materialTask, cuttingTask, productionTask, paintingTask, inspectionTask, deliveryTask];
+  const progress = average(tasks.map(taskProgress));
 
   return {
     sourceRow: rowNumber,
@@ -303,18 +312,7 @@ function parseItem(row: ExcelJS.Row, rowNumber: number, sheetName: string, issue
     progress,
     deliveryDate,
     deliveryStatus,
-    tasks: [
-      ...tasks,
-      {
-        templateId: 'tt-delivery',
-        taskType: 'delivery',
-        name: '发货',
-        ownerDepartmentId: 'dept-delivery',
-        subtasks: [],
-        teamName: undefined,
-        assigneeName: undefined
-      }
-    ]
+    tasks
   };
 
   function subtask(templateId: string, name: string, column: { col: number; letter: string; field: string }): ParsedSubtask {
@@ -326,6 +324,10 @@ function parseItem(row: ExcelJS.Row, rowNumber: number, sheetName: string, issue
       progress: parsed.value,
       raw: parsed.raw
     };
+  }
+
+  function manualSubtask(templateId: string, name: string, sourceColumn: string, progress: number, raw: string): ParsedSubtask {
+    return { templateId, name, sourceColumn, progress, raw };
   }
 }
 
@@ -384,8 +386,50 @@ function importProject(project: ParsedProject, sourceSheet: string) {
 
   ensureCaseMember(projectId, businessOwnerId, 'business_owner', 'import');
   ensureCaseMember(projectId, designOwnerId, 'design_owner', 'import');
-  upsertCaseTask(projectId, null, 'tt-design', '设计确认', 'design', 'dept-design', designOwnerId, null, 100, null, 'E', project.designOwnerName);
-  upsertCaseTask(projectId, null, 'tt-drawing', '图纸定审', 'drawing_review', 'dept-design', designOwnerId, null, project.drawingReviewProgress ?? 0, null, 'F', String(project.drawingReviewProgress ?? ''));
+  const designConfirmProgress = designOwnerId ? 100 : 0;
+  const drawingReviewProgress = project.drawingReviewProgress ?? 0;
+  const designTaskId = upsertCaseTask(
+    projectId,
+    null,
+    'tt-design',
+    '设计',
+    'design',
+    'dept-design',
+    designOwnerId,
+    null,
+    average([designConfirmProgress, drawingReviewProgress]),
+    project.sourceRow,
+    null,
+    ''
+  );
+  upsertCaseSubtask({
+    id: `SUB-${projectId}-st-design-confirm`,
+    taskId: designTaskId,
+    templateId: 'st-design-confirm',
+    name: '设计深化',
+    sortOrder: 10,
+    assigneeId: designOwnerId,
+    teamId: null,
+    progress: designConfirmProgress,
+    plannedQuantity: null,
+    quantityUnit: null,
+    sourceColumn: 'E',
+    rawValue: project.designOwnerName
+  });
+  upsertCaseSubtask({
+    id: `SUB-${projectId}-st-drawing-review`,
+    taskId: designTaskId,
+    templateId: 'st-drawing-review',
+    name: '图纸定审',
+    sortOrder: 20,
+    assigneeId: designOwnerId,
+    teamId: null,
+    progress: drawingReviewProgress,
+    plannedQuantity: null,
+    quantityUnit: null,
+    sourceColumn: 'F',
+    rawValue: String(project.drawingReviewProgress ?? '')
+  });
 
   for (const item of project.items) {
     importItem(projectId, item);
@@ -430,44 +474,74 @@ function importItem(projectId: string, item: ParsedItem) {
   for (const itemTask of item.tasks) {
     const assigneeId = ensureEmployee(itemTask.assigneeName ?? '', itemTask.ownerDepartmentId, assigneeRole(itemTask.taskType));
     const teamId = ensureTeam(itemTask.teamName ?? '');
-    const progress = itemTask.taskType === 'delivery' ? deliveryProgress(item.deliveryDate, item.deliveryStatus) : average(itemTask.subtasks.map((subtaskRow) => subtaskRow.progress).filter((value): value is number => value !== null));
+    const progress = taskProgress(itemTask);
     const taskId = upsertCaseTask(projectId, itemId, itemTask.templateId, itemTask.name, itemTask.taskType, itemTask.ownerDepartmentId, assigneeId, teamId, progress, item.sourceRow, null, '');
     for (const itemSubtask of itemTask.subtasks) {
       const subtaskProgress = itemSubtask.progress ?? 0;
-      db.prepare(
-        `INSERT INTO case_subtask
-         (id, case_task_id, subtask_template_id, parent_subtask_id, name, sort_order, assignee_id, team_id, status, progress, planned_quantity, completed_quantity, quantity_unit, recorded_weight, recorded_piece_count, is_applicable, include_in_progress, source_column, raw_import_value, remark)
-         VALUES (@id, @case_task_id, @subtask_template_id, null, @name, @sort_order, @assignee_id, @team_id, @status, @progress, @planned_quantity, null, @quantity_unit, null, null, 1, 1, @source_column, @raw_import_value, '')
-         ON CONFLICT(id) DO UPDATE SET
-           case_task_id = excluded.case_task_id,
-           subtask_template_id = excluded.subtask_template_id,
-           name = excluded.name,
-           sort_order = excluded.sort_order,
-           assignee_id = excluded.assignee_id,
-           team_id = excluded.team_id,
-           status = excluded.status,
-           progress = excluded.progress,
-           planned_quantity = excluded.planned_quantity,
-           quantity_unit = excluded.quantity_unit,
-           source_column = excluded.source_column,
-           raw_import_value = excluded.raw_import_value`
-      ).run({
+      upsertCaseSubtask({
         id: `SUB-${itemId}-${itemSubtask.templateId}`,
-        case_task_id: taskId,
-        subtask_template_id: itemSubtask.templateId,
+        taskId,
+        templateId: itemSubtask.templateId,
         name: itemSubtask.name,
-        sort_order: subtaskSortOrder(itemSubtask.templateId),
-        assignee_id: assigneeId,
-        team_id: teamId,
-        status: subtaskProgress >= 100 ? 'completed' : subtaskProgress > 0 ? 'in_progress' : 'not_started',
+        sortOrder: subtaskSortOrder(itemSubtask.templateId),
+        assigneeId,
+        teamId,
         progress: subtaskProgress,
-        planned_quantity: item.quantity,
-        quantity_unit: item.quantityUnit,
-        source_column: itemSubtask.sourceColumn,
-        raw_import_value: itemSubtask.raw
+        plannedQuantity: item.quantity,
+        quantityUnit: item.quantityUnit,
+        sourceColumn: itemSubtask.sourceColumn,
+        rawValue: itemSubtask.raw
       });
     }
   }
+}
+
+function upsertCaseSubtask(input: {
+  id: string;
+  taskId: string;
+  templateId: string;
+  name: string;
+  sortOrder: number;
+  assigneeId: string | null;
+  teamId: string | null;
+  progress: number;
+  plannedQuantity: number | null;
+  quantityUnit: string | null;
+  sourceColumn: string;
+  rawValue: string;
+}) {
+  db.prepare(
+    `INSERT INTO case_subtask
+     (id, case_task_id, subtask_template_id, parent_subtask_id, name, sort_order, assignee_id, team_id, status, progress, planned_quantity, completed_quantity, quantity_unit, recorded_weight, recorded_piece_count, is_applicable, include_in_progress, source_column, raw_import_value, remark)
+     VALUES (@id, @case_task_id, @subtask_template_id, null, @name, @sort_order, @assignee_id, @team_id, @status, @progress, @planned_quantity, null, @quantity_unit, null, null, 1, 1, @source_column, @raw_import_value, '')
+     ON CONFLICT(id) DO UPDATE SET
+       case_task_id = excluded.case_task_id,
+       subtask_template_id = excluded.subtask_template_id,
+       name = excluded.name,
+       sort_order = excluded.sort_order,
+       assignee_id = excluded.assignee_id,
+       team_id = excluded.team_id,
+       status = excluded.status,
+       progress = excluded.progress,
+       planned_quantity = excluded.planned_quantity,
+       quantity_unit = excluded.quantity_unit,
+       source_column = excluded.source_column,
+       raw_import_value = excluded.raw_import_value`
+  ).run({
+    id: input.id,
+    case_task_id: input.taskId,
+    subtask_template_id: input.templateId,
+    name: input.name,
+    sort_order: input.sortOrder,
+    assignee_id: input.assigneeId,
+    team_id: input.teamId,
+    status: input.progress >= 100 ? 'completed' : input.progress > 0 ? 'in_progress' : 'not_started',
+    progress: input.progress,
+    planned_quantity: input.plannedQuantity,
+    quantity_unit: input.quantityUnit,
+    source_column: input.sourceColumn,
+    raw_import_value: input.rawValue
+  });
 }
 
 function upsertCaseTask(projectId: string, itemId: string | null, templateId: string, name: string, taskType: string, ownerDepartmentId: string, assigneeId: string | null, teamId: string | null, progress: number, sourceRow: number | null, sourceColumn: string | null, rawValue: string) {
@@ -617,6 +691,14 @@ function average(values: number[]) {
   return roundProgress(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
+function taskProgress(itemTask: ParsedItemTask) {
+  return average(
+    itemTask.subtasks
+      .map((subtaskRow) => subtaskRow.progress)
+      .filter((value): value is number => value !== null)
+  );
+}
+
 function roundProgress(value: number) {
   return Math.round(value * 10) / 10;
 }
@@ -638,9 +720,10 @@ function assigneeRole(taskType: string) {
   return 'team_leader';
 }
 
-function deliveryProgress(deliveryDate: string, deliveryStatus: string) {
-  if (deliveryStatus.includes('已出货') || deliveryStatus.includes('已完成')) return 100;
-  if (deliveryDate) return 30;
+function deliveryExecutionProgress(deliveryStatus: string) {
+  if (!deliveryStatus) return 0;
+  if (deliveryStatus.includes('部分') || /已发\s*\d/.test(deliveryStatus)) return 50;
+  if (deliveryStatus.includes('已出货') || deliveryStatus.includes('已完成') || deliveryStatus.includes('已发')) return 100;
   return 0;
 }
 

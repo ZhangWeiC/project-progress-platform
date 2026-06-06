@@ -1,9 +1,17 @@
-import { Card, Table, Tabs, Tag, Typography } from 'antd';
+import { Alert, Card, Space, Table, Tabs, Tag, Typography } from 'antd';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
+import { fetchWorkflowTemplate } from '../../services/cases';
+import type { WorkflowStage } from '../../types';
 
 export function SettingsPage() {
   const { section = 'templates' } = useParams();
   const navigate = useNavigate();
+  const workflowQuery = useQuery({
+    queryKey: ['workflow-template'],
+    queryFn: fetchWorkflowTemplate
+  });
+
   return (
     <Card>
       <Typography.Title level={4}>后台配置</Typography.Title>
@@ -11,13 +19,56 @@ export function SettingsPage() {
         activeKey={section}
         onChange={(key) => navigate(`/settings/${key}`)}
         items={[
-          { key: 'templates', label: '模板配置', children: <ConfigTable rows={templateRows} /> },
+          {
+            key: 'templates',
+            label: '模板配置',
+            children: workflowQuery.error ? (
+              <Alert type="error" message={workflowQuery.error.message} />
+            ) : (
+              <WorkflowTemplateTable rows={workflowQuery.data?.stages ?? []} loading={workflowQuery.isLoading} />
+            )
+          },
           { key: 'views', label: '视图配置', children: <ConfigTable rows={viewRows} /> },
           { key: 'permissions', label: '权限配置', children: <ConfigTable rows={permissionRows} /> },
           { key: 'dictionaries', label: '字典配置', children: <ConfigTable rows={dictionaryRows} /> }
         ]}
       />
     </Card>
+  );
+}
+
+function WorkflowTemplateTable({ rows, loading }: { rows: WorkflowStage[]; loading: boolean }) {
+  return (
+    <Table<WorkflowStage>
+      rowKey="id"
+      size="small"
+      loading={loading}
+      pagination={false}
+      dataSource={rows}
+      columns={[
+        { title: '顺序', dataIndex: 'sort_order', width: 72, render: (_value, _row, index) => index + 1 },
+        { title: '阶段', dataIndex: 'name', width: 130, render: (value) => <Typography.Text strong>{value}</Typography.Text> },
+        {
+          title: '层级',
+          dataIndex: 'generation_scope',
+          width: 110,
+          render: (value) => <Tag color={value === 'case' ? 'blue' : 'default'}>{value === 'case' ? '项目级' : '子项目级'}</Tag>
+        },
+        {
+          title: '子流程',
+          dataIndex: 'subprocesses',
+          render: (subprocesses: WorkflowStage['subprocesses']) => (
+            <Space size={[4, 4]} wrap>
+              {subprocesses.map((item, index) => (
+                <Tag key={item.id}>{index + 1}. {item.name}</Tag>
+              ))}
+            </Space>
+          )
+        },
+        { title: '责任部门', dataIndex: 'owner_department_name', width: 120, render: (value) => value || '-' },
+        { title: '进度汇总', dataIndex: 'progress_rule', width: 110, render: (value) => value === 'average' ? '子流程平均' : '手工维护' }
+      ]}
+    />
   );
 }
 
@@ -45,12 +96,6 @@ function ConfigTable({ rows }: { rows: ConfigRow[] }) {
     />
   );
 }
-
-const templateRows: ConfigRow[] = [
-  { key: 'tpl-steel-v1', name: '钢结构项目模板 v1', scope: '通用', status: 'active', updated_at: '2026-04-01' },
-  { key: 'tt-material', name: '材料入库任务', scope: '子项目', status: 'active', updated_at: '2026-04-01' },
-  { key: 'tt-production', name: '装焊生产任务', scope: '子项目', status: 'active', updated_at: '2026-04-01' }
-];
 
 const viewRows: ConfigRow[] = [
   { key: 'default-matrix', name: '项目进度总览', scope: 'Web', status: 'active', updated_at: '2026-04-01' },

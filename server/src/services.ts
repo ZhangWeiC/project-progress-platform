@@ -144,8 +144,22 @@ function recalculateItem(itemId: string) {
 }
 
 function recalculateCase(projectCaseId: string) {
-  const items = db.prepare('SELECT progress FROM case_item WHERE project_case_id = ?').all(projectCaseId) as Array<{ progress: number }>;
-  const avg = items.length > 0 ? roundProgress(items.reduce((sum, row) => sum + row.progress, 0) / items.length) : 0;
+  const caseTasks = db
+    .prepare('SELECT progress FROM case_task WHERE project_case_id = ? AND case_item_id IS NULL AND is_applicable = 1 AND include_in_progress = 1')
+    .all(projectCaseId) as Array<{ progress: number }>;
+  const items = db.prepare('SELECT id FROM case_item WHERE project_case_id = ?').all(projectCaseId) as Array<{ id: string }>;
+  const itemFlowProgress = items.map((item) => {
+    const itemTasks = db
+      .prepare('SELECT progress FROM case_task WHERE case_item_id = ? AND is_applicable = 1 AND include_in_progress = 1')
+      .all(item.id) as Array<{ progress: number }>;
+    const stages = [...caseTasks, ...itemTasks];
+    return stages.length > 0 ? stages.reduce((sum, row) => sum + row.progress, 0) / stages.length : 0;
+  });
+  const avg = itemFlowProgress.length > 0
+    ? roundProgress(itemFlowProgress.reduce((sum, progress) => sum + progress, 0) / itemFlowProgress.length)
+    : caseTasks.length > 0
+      ? roundProgress(caseTasks.reduce((sum, row) => sum + row.progress, 0) / caseTasks.length)
+      : 0;
   const status = avg >= 100 ? 'completed' : avg > 0 ? 'in_progress' : 'not_started';
   db.prepare('UPDATE project_case SET total_progress = ?, status = ? WHERE id = ?').run(avg, status, projectCaseId);
 }
@@ -243,13 +257,13 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
   }>;
   const subtaskTemplates = db
     .prepare(
-      `SELECT tt.task_type, tt.name as task_name, st.id as subtask_template_id, st.name as subtask_name, st.sort_order
+      `SELECT tt.task_type, tt.name as task_name, tt.generation_scope,
+              st.id as subtask_template_id, st.name as subtask_name, st.sort_order
        FROM task_template tt
        JOIN subtask_template st ON st.task_template_id = tt.id
-       WHERE tt.generation_scope = 'item'
        ORDER BY tt.sort_order, st.sort_order`
     )
-    .all() as Array<{ task_type: string; task_name: string; subtask_template_id: string; subtask_name: string; sort_order: number }>;
+    .all() as Array<{ task_type: string; task_name: string; generation_scope: string; subtask_template_id: string; subtask_name: string; sort_order: number }>;
 
   const columns = [
     { key: 'case_name', title: '项目名称', frozen: true },
@@ -266,8 +280,13 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
     }))
   ];
 
+  const caseTasks = db
+    .prepare('SELECT * FROM case_task WHERE project_case_id = ? AND case_item_id IS NULL')
+    .all(projectCaseId) as Array<{ id: string; task_type: string; name: string; progress: number }>;
+
   const rows = items.map((item) => {
-    const tasks = db.prepare('SELECT * FROM case_task WHERE case_item_id = ?').all(item.id) as Array<{ id: string; task_type: string; name: string; progress: number }>;
+    const itemTasks = db.prepare('SELECT * FROM case_task WHERE case_item_id = ?').all(item.id) as Array<{ id: string; task_type: string; name: string; progress: number }>;
+    const tasks = [...caseTasks, ...itemTasks];
     const cells: Record<string, unknown> = {
       case_name: { value: projectCase.name },
       case_item_name: { value: item.name },

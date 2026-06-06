@@ -281,6 +281,7 @@ export function initializeDatabase() {
   `);
 
   seedDatabase();
+  migrateWorkflowModel();
 }
 
 function insertMany(table: string, rows: Array<Record<string, unknown>>) {
@@ -329,16 +330,18 @@ function seedDatabase() {
   ]);
 
   insertMany('task_template', [
-    { id: 'tt-design', case_template_id: 'tpl-steel-v1', name: '设计确认', task_type: 'design', sort_order: 10, generation_scope: 'case', default_owner_department_id: 'dept-design', progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'tt-drawing', case_template_id: 'tpl-steel-v1', name: '图纸定审', task_type: 'drawing_review', sort_order: 20, generation_scope: 'case', default_owner_department_id: 'dept-design', progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'tt-material', case_template_id: 'tpl-steel-v1', name: '材料入库', task_type: 'material', sort_order: 30, generation_scope: 'item', default_owner_department_id: 'dept-material', progress_rule: 'average', required: 1, skippable: 0 },
-    { id: 'tt-cutting', case_template_id: 'tpl-steel-v1', name: '下料加工', task_type: 'cutting', sort_order: 40, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 },
-    { id: 'tt-production', case_template_id: 'tpl-steel-v1', name: '装焊生产', task_type: 'production', sort_order: 50, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 },
+    { id: 'tt-design', case_template_id: 'tpl-steel-v1', name: '设计', task_type: 'design', sort_order: 10, generation_scope: 'case', default_owner_department_id: 'dept-design', progress_rule: 'average', required: 1, skippable: 0 },
+    { id: 'tt-material', case_template_id: 'tpl-steel-v1', name: '材料入库', task_type: 'material', sort_order: 20, generation_scope: 'item', default_owner_department_id: 'dept-material', progress_rule: 'average', required: 1, skippable: 0 },
+    { id: 'tt-cutting', case_template_id: 'tpl-steel-v1', name: '下料', task_type: 'cutting', sort_order: 30, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 },
+    { id: 'tt-production', case_template_id: 'tpl-steel-v1', name: '装焊', task_type: 'production', sort_order: 40, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 },
+    { id: 'tt-painting', case_template_id: 'tpl-steel-v1', name: '喷涂', task_type: 'painting', sort_order: 50, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 },
     { id: 'tt-inspection', case_template_id: 'tpl-steel-v1', name: '验收', task_type: 'inspection', sort_order: 60, generation_scope: 'item', default_owner_department_id: 'dept-quality', progress_rule: 'average', required: 1, skippable: 0 },
-    { id: 'tt-delivery', case_template_id: 'tpl-steel-v1', name: '发货', task_type: 'delivery', sort_order: 70, generation_scope: 'item', default_owner_department_id: 'dept-delivery', progress_rule: 'manual', required: 1, skippable: 0 }
+    { id: 'tt-delivery', case_template_id: 'tpl-steel-v1', name: '发货', task_type: 'delivery', sort_order: 70, generation_scope: 'item', default_owner_department_id: 'dept-delivery', progress_rule: 'average', required: 1, skippable: 0 }
   ]);
 
   insertMany('subtask_template', [
+    { id: 'st-design-confirm', task_template_id: 'tt-design', name: '设计深化', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
+    { id: 'st-drawing-review', task_template_id: 'tt-design', name: '图纸定审', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0 },
     { id: 'st-plate-purchase', task_template_id: 'tt-material', name: '板材请购', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
     { id: 'st-plate-in', task_template_id: 'tt-material', name: '板材入库', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0 },
     { id: 'st-profile-purchase', task_template_id: 'tt-material', name: '型材请购', sort_order: 30, progress_rule: 'manual', required: 1, skippable: 0 },
@@ -352,10 +355,12 @@ function seedDatabase() {
     { id: 'st-welding', task_template_id: 'tt-production', name: '单片体焊接', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0 },
     { id: 'st-cleaning', task_template_id: 'tt-production', name: '单片体清磨', sort_order: 30, progress_rule: 'manual', required: 1, skippable: 0 },
     { id: 'st-preassembly', task_template_id: 'tt-production', name: '预拼装、校正', sort_order: 40, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-painting', task_template_id: 'tt-production', name: '喷涂', sort_order: 50, progress_rule: 'manual', required: 0, skippable: 1 },
+    { id: 'st-painting', task_template_id: 'tt-painting', name: '喷涂作业', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
     { id: 'st-self-check', task_template_id: 'tt-inspection', name: '自检', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
     { id: 'st-mutual-check', task_template_id: 'tt-inspection', name: '互检', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-special-check', task_template_id: 'tt-inspection', name: '专检', sort_order: 30, progress_rule: 'manual', required: 1, skippable: 0 }
+    { id: 'st-special-check', task_template_id: 'tt-inspection', name: '专检', sort_order: 30, progress_rule: 'manual', required: 1, skippable: 0 },
+    { id: 'st-delivery-plan', task_template_id: 'tt-delivery', name: '发货计划', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
+    { id: 'st-delivery-execute', task_template_id: 'tt-delivery', name: '发货执行', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0 }
   ]);
 
   insertMany('project_case', [
@@ -545,6 +550,331 @@ function seedLogsAndExceptions() {
       updated_at: new Date().toISOString()
     }
   ]);
+}
+
+function migrateWorkflowModel() {
+  insertMany('task_template', [
+    { id: 'tt-painting', case_template_id: 'tpl-steel-v1', name: '喷涂', task_type: 'painting', sort_order: 50, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 }
+  ]);
+  insertMany('subtask_template', [
+    { id: 'st-design-confirm', task_template_id: 'tt-design', name: '设计深化', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
+    { id: 'st-drawing-review', task_template_id: 'tt-design', name: '图纸定审', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0 },
+    { id: 'st-delivery-plan', task_template_id: 'tt-delivery', name: '发货计划', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
+    { id: 'st-delivery-execute', task_template_id: 'tt-delivery', name: '发货执行', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0 }
+  ]);
+
+  const tx = db.transaction(() => {
+    db.prepare("UPDATE task_template SET name = '设计', task_type = 'design', sort_order = 10, generation_scope = 'case', progress_rule = 'average' WHERE id = 'tt-design'").run();
+    db.prepare("UPDATE task_template SET sort_order = 20 WHERE id = 'tt-material'").run();
+    db.prepare("UPDATE task_template SET name = '下料', sort_order = 30 WHERE id = 'tt-cutting'").run();
+    db.prepare("UPDATE task_template SET name = '装焊', sort_order = 40 WHERE id = 'tt-production'").run();
+    db.prepare("UPDATE task_template SET name = '喷涂', task_type = 'painting', sort_order = 50, generation_scope = 'item', progress_rule = 'average' WHERE id = 'tt-painting'").run();
+    db.prepare("UPDATE task_template SET sort_order = 60 WHERE id = 'tt-inspection'").run();
+    db.prepare("UPDATE task_template SET sort_order = 70, progress_rule = 'average' WHERE id = 'tt-delivery'").run();
+    db.prepare("UPDATE subtask_template SET task_template_id = 'tt-painting', name = '喷涂作业', sort_order = 10, required = 1, skippable = 0 WHERE id = 'st-painting'").run();
+
+    migrateDesignTasks();
+    migratePaintingTasks();
+    migrateDeliveryTasks();
+    recalculateImportedProgress();
+
+    db.prepare("DELETE FROM task_template WHERE id = 'tt-drawing' AND NOT EXISTS (SELECT 1 FROM case_task WHERE task_template_id = 'tt-drawing')").run();
+  });
+  tx();
+}
+
+function migrateDesignTasks() {
+  const projects = db.prepare('SELECT id, design_owner_id FROM project_case').all() as Array<{ id: string; design_owner_id: string | null }>;
+  for (const project of projects) {
+    let designTask = db
+      .prepare("SELECT * FROM case_task WHERE project_case_id = ? AND case_item_id IS NULL AND task_type = 'design' LIMIT 1")
+      .get(project.id) as { id: string; progress: number; assignee_id: string | null } | undefined;
+    const drawingTask = db
+      .prepare("SELECT * FROM case_task WHERE project_case_id = ? AND case_item_id IS NULL AND task_type = 'drawing_review' LIMIT 1")
+      .get(project.id) as { id: string; progress: number } | undefined;
+    const existingDesignSubtask = db
+      .prepare(
+        `SELECT s.progress
+         FROM case_subtask s
+         JOIN case_task t ON t.id = s.case_task_id
+         WHERE t.project_case_id = ? AND t.case_item_id IS NULL
+           AND s.subtask_template_id = 'st-design-confirm'
+         LIMIT 1`
+      )
+      .get(project.id) as { progress: number } | undefined;
+    const existingDrawingSubtask = db
+      .prepare(
+        `SELECT s.progress
+         FROM case_subtask s
+         JOIN case_task t ON t.id = s.case_task_id
+         WHERE t.project_case_id = ? AND t.case_item_id IS NULL
+           AND s.subtask_template_id = 'st-drawing-review'
+         LIMIT 1`
+      )
+      .get(project.id) as { progress: number } | undefined;
+
+    if (!designTask) {
+      const taskId = `TASK-${project.id}-design`;
+      db.prepare(
+        `INSERT INTO case_task
+         (id, project_case_id, case_item_id, task_template_id, name, task_type, owner_department_id, assignee_id, team_id, status, progress, is_delayed, is_applicable, include_in_progress, source_row, source_column, raw_import_value, remark)
+         VALUES (?, ?, null, 'tt-design', '设计', 'design', 'dept-design', ?, null, 'not_started', 0, 0, 1, 1, null, 'E', '', '')`
+      ).run(taskId, project.id, project.design_owner_id);
+      designTask = { id: taskId, progress: 0, assignee_id: project.design_owner_id };
+    }
+
+    const designProgress = existingDesignSubtask?.progress
+      ?? (designTask.progress > 0 ? designTask.progress : project.design_owner_id ? 100 : 0);
+    const drawingProgress = existingDrawingSubtask?.progress ?? drawingTask?.progress ?? 0;
+    upsertMigratedSubtask({
+      id: `SUB-${project.id}-st-design-confirm`,
+      taskId: designTask.id,
+      templateId: 'st-design-confirm',
+      name: '设计深化',
+      sortOrder: 10,
+      assigneeId: designTask.assignee_id ?? project.design_owner_id,
+      progress: designProgress,
+      sourceColumn: 'E',
+      rawValue: ''
+    });
+    upsertMigratedSubtask({
+      id: `SUB-${project.id}-st-drawing-review`,
+      taskId: designTask.id,
+      templateId: 'st-drawing-review',
+      name: '图纸定审',
+      sortOrder: 20,
+      assigneeId: designTask.assignee_id ?? project.design_owner_id,
+      progress: drawingProgress,
+      sourceColumn: 'F',
+      rawValue: ''
+    });
+
+    if (drawingTask && drawingTask.id !== designTask.id) {
+      db.prepare('UPDATE work_log_entry SET case_task_id = ? WHERE case_task_id = ?').run(designTask.id, drawingTask.id);
+      db.prepare('UPDATE exception_record SET case_task_id = ? WHERE case_task_id = ?').run(designTask.id, drawingTask.id);
+      db.prepare("UPDATE progress_log SET target_id = ? WHERE target_type = 'task' AND target_id = ?").run(designTask.id, drawingTask.id);
+      db.prepare('UPDATE case_subtask SET case_task_id = ? WHERE case_task_id = ?').run(designTask.id, drawingTask.id);
+      db.prepare('DELETE FROM case_task WHERE id = ?').run(drawingTask.id);
+    }
+
+    updateTaskProgress(designTask.id, averageProgress([designProgress, drawingProgress]));
+    db.prepare(
+      `UPDATE case_task
+       SET task_template_id = 'tt-design', name = '设计', task_type = 'design',
+           owner_department_id = 'dept-design', assignee_id = ?
+       WHERE id = ?`
+    ).run(project.design_owner_id, designTask.id);
+  }
+}
+
+function migratePaintingTasks() {
+  const items = db.prepare('SELECT id, project_case_id FROM case_item').all() as Array<{ id: string; project_case_id: string }>;
+  for (const item of items) {
+    const productionTask = db
+      .prepare("SELECT * FROM case_task WHERE case_item_id = ? AND task_type = 'production' LIMIT 1")
+      .get(item.id) as { id: string; assignee_id: string | null; team_id: string | null } | undefined;
+    let paintingTask = db
+      .prepare("SELECT * FROM case_task WHERE case_item_id = ? AND task_type = 'painting' LIMIT 1")
+      .get(item.id) as { id: string } | undefined;
+    const paintingSubtask = db
+      .prepare(
+        `SELECT s.id, s.progress
+         FROM case_subtask s
+         JOIN case_task t ON t.id = s.case_task_id
+         WHERE t.case_item_id = ? AND s.subtask_template_id = 'st-painting'
+         LIMIT 1`
+      )
+      .get(item.id) as { id: string; progress: number } | undefined;
+
+    if (!paintingTask) {
+      const taskId = `TASK-${item.id}-painting`;
+      db.prepare(
+        `INSERT INTO case_task
+         (id, project_case_id, case_item_id, task_template_id, name, task_type, owner_department_id, assignee_id, team_id, status, progress, is_delayed, is_applicable, include_in_progress, source_row, source_column, raw_import_value, remark)
+         VALUES (?, ?, ?, 'tt-painting', '喷涂', 'painting', 'dept-production', ?, ?, 'not_started', 0, 0, 1, 1, null, 'Y', '', '')`
+      ).run(taskId, item.project_case_id, item.id, productionTask?.assignee_id ?? null, productionTask?.team_id ?? null);
+      paintingTask = { id: taskId };
+    }
+
+    const progress = paintingSubtask?.progress ?? 0;
+    if (paintingSubtask) {
+      db.prepare('UPDATE work_log_entry SET case_task_id = ? WHERE case_subtask_id = ?').run(paintingTask.id, paintingSubtask.id);
+      db.prepare('UPDATE exception_record SET case_task_id = ? WHERE case_subtask_id = ?').run(paintingTask.id, paintingSubtask.id);
+      db.prepare(
+        `UPDATE case_subtask
+         SET case_task_id = ?, name = '喷涂作业', sort_order = 10,
+             assignee_id = ?, team_id = ?
+         WHERE id = ?`
+      ).run(paintingTask.id, productionTask?.assignee_id ?? null, productionTask?.team_id ?? null, paintingSubtask.id);
+    } else {
+      upsertMigratedSubtask({
+        id: `SUB-${item.id}-st-painting`,
+        taskId: paintingTask.id,
+        templateId: 'st-painting',
+        name: '喷涂作业',
+        sortOrder: 10,
+        assigneeId: productionTask?.assignee_id ?? null,
+        teamId: productionTask?.team_id ?? null,
+        progress,
+        sourceColumn: 'Y',
+        rawValue: ''
+      });
+    }
+    updateTaskProgress(paintingTask.id, progress);
+
+    if (productionTask) {
+      const productionProgress = db
+        .prepare('SELECT progress FROM case_subtask WHERE case_task_id = ? AND is_applicable = 1 AND include_in_progress = 1')
+        .all(productionTask.id) as Array<{ progress: number }>;
+      updateTaskProgress(productionTask.id, averageProgress(productionProgress.map((row) => row.progress)));
+      db.prepare("UPDATE case_task SET name = '装焊', task_template_id = 'tt-production' WHERE id = ?").run(productionTask.id);
+    }
+  }
+}
+
+function migrateDeliveryTasks() {
+  const items = db.prepare('SELECT id, project_case_id, delivery_date, delivery_status FROM case_item').all() as Array<{
+    id: string;
+    project_case_id: string;
+    delivery_date: string | null;
+    delivery_status: string | null;
+  }>;
+  for (const item of items) {
+    let deliveryTask = db
+      .prepare("SELECT id FROM case_task WHERE case_item_id = ? AND task_type = 'delivery' LIMIT 1")
+      .get(item.id) as { id: string } | undefined;
+    if (!deliveryTask) {
+      const taskId = `TASK-${item.id}-delivery`;
+      db.prepare(
+        `INSERT INTO case_task
+         (id, project_case_id, case_item_id, task_template_id, name, task_type, owner_department_id, assignee_id, team_id, status, progress, is_delayed, is_applicable, include_in_progress, source_row, source_column, raw_import_value, remark)
+         VALUES (?, ?, ?, 'tt-delivery', '发货', 'delivery', 'dept-delivery', null, null, 'not_started', 0, 0, 1, 1, null, 'AE', '', '')`
+      ).run(taskId, item.project_case_id, item.id);
+      deliveryTask = { id: taskId };
+    }
+
+    const planProgress = item.delivery_date ? 100 : 0;
+    const executeProgress = migratedDeliveryProgress(item.delivery_status ?? '');
+    const existingPlan = db
+      .prepare("SELECT progress FROM case_subtask WHERE case_task_id = ? AND subtask_template_id = 'st-delivery-plan'")
+      .get(deliveryTask.id) as { progress: number } | undefined;
+    const existingExecute = db
+      .prepare("SELECT progress FROM case_subtask WHERE case_task_id = ? AND subtask_template_id = 'st-delivery-execute'")
+      .get(deliveryTask.id) as { progress: number } | undefined;
+    const effectivePlanProgress = existingPlan?.progress ?? planProgress;
+    const effectiveExecuteProgress = existingExecute?.progress ?? executeProgress;
+    upsertMigratedSubtask({
+      id: `SUB-${item.id}-st-delivery-plan`,
+      taskId: deliveryTask.id,
+      templateId: 'st-delivery-plan',
+      name: '发货计划',
+      sortOrder: 10,
+      progress: effectivePlanProgress,
+      sourceColumn: 'AD',
+      rawValue: item.delivery_date ?? ''
+    });
+    upsertMigratedSubtask({
+      id: `SUB-${item.id}-st-delivery-execute`,
+      taskId: deliveryTask.id,
+      templateId: 'st-delivery-execute',
+      name: '发货执行',
+      sortOrder: 20,
+      progress: effectiveExecuteProgress,
+      sourceColumn: 'AE',
+      rawValue: item.delivery_status ?? ''
+    });
+    updateTaskProgress(deliveryTask.id, averageProgress([effectivePlanProgress, effectiveExecuteProgress]));
+  }
+}
+
+function upsertMigratedSubtask(input: {
+  id: string;
+  taskId: string;
+  templateId: string;
+  name: string;
+  sortOrder: number;
+  assigneeId?: string | null;
+  teamId?: string | null;
+  progress: number;
+  sourceColumn: string;
+  rawValue: string;
+}) {
+  const status = progressStatus(input.progress);
+  db.prepare(
+    `INSERT INTO case_subtask
+     (id, case_task_id, subtask_template_id, parent_subtask_id, name, sort_order, assignee_id, team_id, status, progress, is_applicable, include_in_progress, source_column, raw_import_value, remark)
+     VALUES (@id, @task_id, @template_id, null, @name, @sort_order, @assignee_id, @team_id, @status, @progress, 1, 1, @source_column, @raw_value, '')
+     ON CONFLICT(id) DO UPDATE SET
+       case_task_id = excluded.case_task_id,
+       subtask_template_id = excluded.subtask_template_id,
+       name = excluded.name,
+       sort_order = excluded.sort_order,
+       assignee_id = excluded.assignee_id,
+       team_id = excluded.team_id,
+       status = excluded.status,
+       progress = excluded.progress,
+       source_column = excluded.source_column,
+       raw_import_value = excluded.raw_import_value`
+  ).run({
+    id: input.id,
+    task_id: input.taskId,
+    template_id: input.templateId,
+    name: input.name,
+    sort_order: input.sortOrder,
+    assignee_id: input.assigneeId ?? null,
+    team_id: input.teamId ?? null,
+    status,
+    progress: input.progress,
+    source_column: input.sourceColumn,
+    raw_value: input.rawValue
+  });
+}
+
+function recalculateImportedProgress() {
+  const items = db.prepare('SELECT id FROM case_item').all() as Array<{ id: string }>;
+  for (const item of items) {
+    const taskRows = db
+      .prepare('SELECT progress FROM case_task WHERE case_item_id = ? AND is_applicable = 1 AND include_in_progress = 1')
+      .all(item.id) as Array<{ progress: number }>;
+    const progress = averageProgress(taskRows.map((row) => row.progress));
+    db.prepare('UPDATE case_item SET progress = ?, status = ? WHERE id = ?').run(progress, progressStatus(progress), item.id);
+  }
+
+  const projects = db.prepare('SELECT id FROM project_case').all() as Array<{ id: string }>;
+  for (const project of projects) {
+    const caseTaskRows = db
+      .prepare('SELECT progress FROM case_task WHERE project_case_id = ? AND case_item_id IS NULL AND is_applicable = 1 AND include_in_progress = 1')
+      .all(project.id) as Array<{ progress: number }>;
+    const itemRows = db.prepare('SELECT id FROM case_item WHERE project_case_id = ?').all(project.id) as Array<{ id: string }>;
+    const rowProgress = itemRows.map((item) => {
+      const itemTaskRows = db
+        .prepare('SELECT progress FROM case_task WHERE case_item_id = ? AND is_applicable = 1 AND include_in_progress = 1')
+        .all(item.id) as Array<{ progress: number }>;
+      return averageProgress([...caseTaskRows, ...itemTaskRows].map((row) => row.progress));
+    });
+    const progress = rowProgress.length > 0 ? averageProgress(rowProgress) : averageProgress(caseTaskRows.map((row) => row.progress));
+    db.prepare('UPDATE project_case SET total_progress = ?, status = ? WHERE id = ?').run(progress, progressStatus(progress), project.id);
+  }
+}
+
+function updateTaskProgress(taskId: string, progress: number) {
+  db.prepare('UPDATE case_task SET progress = ?, status = ? WHERE id = ?').run(progress, progressStatus(progress), taskId);
+}
+
+function averageProgress(values: number[]) {
+  if (values.length === 0) return 0;
+  return Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10;
+}
+
+function progressStatus(progress: number) {
+  return progress >= 100 ? 'completed' : progress > 0 ? 'in_progress' : 'not_started';
+}
+
+function migratedDeliveryProgress(status: string) {
+  if (!status) return 0;
+  if (status.includes('部分') || /已发\s*\d/.test(status)) return 50;
+  if (status.includes('已出货') || status.includes('已完成') || status.includes('已发')) return 100;
+  return 0;
 }
 
 export function nowIso() {

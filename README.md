@@ -23,6 +23,8 @@ npm run dev
 ## 当前 MVP
 
 - Case / CaseItem / Task / SubTask 样例数据
+- 七阶段项目流程：设计 -> 材料入库 -> 下料 -> 装焊 -> 喷涂 -> 验收 -> 发货
+- 阶段下配置子流程；设计为项目级，后续阶段为子项目级
 - Web Excel 式进度矩阵
 - Task / SubTask 进度更新
 - WorkLog 日报录入

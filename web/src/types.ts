@@ -169,3 +169,32 @@ export type ImportTaskPreview = {
   preview_rows: ImportPreviewRow[];
   issues: ImportIssue[];
 };
+
+export type WorkflowSubprocess = {
+  id: string;
+  name: string;
+  sort_order: number;
+  progress_rule: string;
+  required: number;
+  skippable: number;
+};
+
+export type WorkflowStage = {
+  id: string;
+  name: string;
+  task_type: string;
+  sort_order: number;
+  generation_scope: 'case' | 'item';
+  owner_department_name?: string;
+  progress_rule: string;
+  subprocesses: WorkflowSubprocess[];
+};
+
+export type WorkflowTemplate = {
+  id: string;
+  name: string;
+  version: string;
+  status: string;
+  description?: string;
+  stages: WorkflowStage[];
+};
