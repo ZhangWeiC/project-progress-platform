@@ -41,6 +41,9 @@ export function CaseMatrixPage() {
             项目进度总览
           </Typography.Title>
           <Select
+            showSearch
+            optionFilterProp="label"
+            placeholder="搜索项目"
             value={activeCaseId}
             style={{ width: 340 }}
             loading={casesQuery.isLoading}

@@ -44,6 +44,9 @@ export function WorkLogsPage() {
             <Form.Item label="任务" name="case_task_id" rules={[{ required: true }]}>
               <Select
                 showSearch
+                allowClear
+                optionFilterProp="label"
+                placeholder="搜索项目、子项目或阶段"
                 options={(tasks.data ?? []).map((item) => ({
                   value: String(item.id),
                   label: `${item.case_name ?? ''} / ${item.item_name ?? '-'} / ${item.name ?? ''}`
@@ -52,6 +55,9 @@ export function WorkLogsPage() {
             </Form.Item>
             <Form.Item label="实际工作员工" name="actual_employee_id" rules={[{ required: true }]}>
               <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder="搜索员工"
                 options={(lookups.data?.employees ?? []).map((item) => ({ value: item.id, label: item.name }))}
               />
             </Form.Item>

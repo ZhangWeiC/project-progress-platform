@@ -49,6 +49,10 @@ export function ExceptionsPage() {
           <div className="form-grid">
             <Form.Item label="关联任务" name="case_task_id" rules={[{ required: true }]}>
               <Select
+                showSearch
+                allowClear
+                optionFilterProp="label"
+                placeholder="搜索项目、子项目或阶段"
                 options={(tasks.data ?? []).map((item) => ({
                   value: String(item.id),
                   label: `${item.case_name ?? ''} / ${item.item_name ?? '-'} / ${item.name ?? ''}`
@@ -56,10 +60,22 @@ export function ExceptionsPage() {
               />
             </Form.Item>
             <Form.Item label="责任部门" name="responsible_department_id">
-              <Select options={(lookups.data?.departments ?? []).map((item) => ({ value: item.id, label: item.name }))} />
+              <Select
+                showSearch
+                allowClear
+                optionFilterProp="label"
+                placeholder="搜索责任部门"
+                options={(lookups.data?.departments ?? []).map((item) => ({ value: item.id, label: item.name }))}
+              />
             </Form.Item>
             <Form.Item label="当前处理人" name="current_handler_id">
-              <Select options={(lookups.data?.employees ?? []).map((item) => ({ value: item.id, label: item.name }))} />
+              <Select
+                showSearch
+                allowClear
+                optionFilterProp="label"
+                placeholder="搜索处理人"
+                options={(lookups.data?.employees ?? []).map((item) => ({ value: item.id, label: item.name }))}
+              />
             </Form.Item>
             <Form.Item label="等级" name="level">
               <Select options={[{ value: 'low', label: '低' }, { value: 'medium', label: '中' }, { value: 'high', label: '高' }]} />
