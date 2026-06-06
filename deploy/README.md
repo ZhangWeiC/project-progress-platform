@@ -139,3 +139,8 @@ sudo -u project-progress env DATA_DIR=/var/lib/project-progress-platform \
 ## 8. 域名与 HTTPS
 
 中国内地 ECS 使用域名对外提供 Web 服务前，需要按规定完成 ICP 备案。备案完成后，再将域名解析到 ECS 公网 IP，并配置 HTTPS 证书和 `443` 监听。
+
+当前 `aifuer.top` 的 HTTPS 配置模板位于 `deploy/nginx-aifuer.conf`。证书文件约定为：
+
+- `/etc/nginx/ssl/cert.pem`
+- `/etc/nginx/ssl/cert.key`
