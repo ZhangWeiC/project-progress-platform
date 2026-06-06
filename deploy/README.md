@@ -1,10 +1,11 @@
-# 阿里云 ECS 部署
+# 阿里云 ECS 原生部署
 
-推荐使用一台 Linux ECS 运行 Docker Compose：
+所有组件部署在同一台 Linux ECS，不使用 Docker：
 
-- `web`：Nginx，提供 Web/H5 静态页面并代理 `/api`
-- `api`：Node.js + Fastify，仅在容器网络内开放
-- `app_data`：SQLite 持久卷，重新构建容器不会清空数据
+- Nginx：提供 Web/H5 静态页面，并将 `/api` 代理到 Node.js
+- Node.js + Fastify：仅监听 `127.0.0.1:4000`
+- SQLite：存放于 `/var/lib/project-progress-platform/app.db`
+- systemd：管理 Node 服务并设置开机自启
 
 ## 1. ECS 准备
 
@@ -13,41 +14,78 @@
 - 操作系统：Alibaba Cloud Linux 3 或 Ubuntu 22.04/24.04
 - 规格：2 vCPU / 4 GiB 起步
 - 系统盘：40 GiB 起步
+- Node.js：20 LTS
 - 安全组：公网只开放 `80`、`443`；`22` 仅允许管理员固定 IP
 
-安装 Docker Engine 和 Docker Compose 插件后，确认：
+安装基础软件：
 
 ```bash
-docker --version
-docker compose version
+# Alibaba Cloud Linux 3
+sudo dnf install -y git nginx gcc-c++ make python3
+
+# Ubuntu
+sudo apt update
+sudo apt install -y git nginx build-essential python3
 ```
 
-## 2. 拉取与配置
+安装 Node.js 20 后确认：
+
+```bash
+node --version
+corepack enable
+corepack prepare pnpm@9.15.5 --activate
+pnpm --version
+```
+
+systemd 文件默认使用 `/usr/bin/node`，如果 `command -v node` 输出其他路径，需要同步修改服务文件中的 `ExecStart`。
+
+## 2. 拉取和构建
 
 ```bash
 sudo mkdir -p /opt/project-progress-platform
 sudo chown "$USER":"$USER" /opt/project-progress-platform
 git clone git@github.com:ZhangWeiC/project-progress-platform.git /opt/project-progress-platform
 cd /opt/project-progress-platform
-cp .env.example .env
+pnpm install --frozen-lockfile
+pnpm run build
 ```
 
-编辑 `.env`，至少替换：
-
-```dotenv
-APP_PORT=80
-INITIAL_USER_PASSWORD=一个至少12位的强密码
-TZ=Asia/Shanghai
-```
-
-`INITIAL_USER_PASSWORD` 会用于新建账号，也会替换已有数据库中仍为 `123456` 的账号密码。
-
-## 3. 启动
+## 3. 配置系统服务
 
 ```bash
-docker compose up -d --build
-docker compose ps
-docker compose logs --tail=100 api
+sudo useradd --system --home /nonexistent --shell /usr/sbin/nologin project-progress 2>/dev/null || true
+sudo mkdir -p /var/lib/project-progress-platform
+sudo chown project-progress:project-progress /var/lib/project-progress-platform
+
+sudo cp deploy/project-progress-platform.service /etc/systemd/system/
+sudo cp .env.example /etc/project-progress-platform.env
+sudo chmod 600 /etc/project-progress-platform.env
+sudo vi /etc/project-progress-platform.env
+```
+
+至少将 `INITIAL_USER_PASSWORD` 替换为 12 位以上的强密码。它会用于新账号，并替换数据库中仍为 `123456` 的旧密码。
+
+启动 API：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now project-progress-platform
+sudo systemctl status project-progress-platform
+curl http://127.0.0.1:4000/api/health
+```
+
+## 4. 配置 Nginx
+
+```bash
+sudo cp deploy/nginx.conf /etc/nginx/conf.d/project-progress-platform.conf
+
+# Ubuntu 默认站点会占用 80 端口，需要禁用
+sudo rm -f /etc/nginx/sites-enabled/default
+
+# 如果 /etc/nginx/conf.d/default.conf 存在且也是默认站点，请先备份再禁用
+sudo nginx -t
+sudo systemctl enable --now nginx
+sudo systemctl reload nginx
 ```
 
 浏览器访问：
@@ -56,54 +94,48 @@ docker compose logs --tail=100 api
 - H5：`http://ECS公网IP/m`
 - 健康检查：`http://ECS公网IP/healthz`
 
-初始管理员账号为 `admin`，密码为 `.env` 中的 `INITIAL_USER_PASSWORD`。
+初始管理员账号为 `admin`。
 
-## 4. 更新版本
+## 5. 迁移当前数据
 
-```bash
-cd /opt/project-progress-platform
-git pull --ff-only
-docker compose up -d --build
-docker image prune -f
-```
-
-## 5. 数据备份
-
-本地开发数据包含 WAL 增量，不能只复制 `server/data/app.db`。使用 SQLite 在线备份：
+本地数据库包含 WAL 增量，不能只复制 `server/data/app.db`。先在本地生成一致性备份：
 
 ```bash
 npm run backup:data -- /tmp/project-progress-app.db
-```
-
-把现有本地数据首次迁移到 ECS：
-
-```bash
-# 本地执行
 scp /tmp/project-progress-app.db ECS用户@ECS公网IP:/tmp/project-progress-app.db
-
-# ECS 执行
-cd /opt/project-progress-platform
-mkdir -p restore
-mv /tmp/project-progress-app.db restore/app.db
-docker compose stop api
-docker compose run --rm -v "$PWD/restore:/restore:ro" api node -e \
-  "const Database=require('better-sqlite3'); const db=new Database('/restore/app.db',{readonly:true}); db.backup('/app/data/app.db').then(()=>db.close())"
-docker compose start api
-rm -rf restore
 ```
 
-线上日常备份：
+在 ECS 上恢复：
+
+```bash
+sudo systemctl stop project-progress-platform
+sudo install -o project-progress -g project-progress -m 600 \
+  /tmp/project-progress-app.db /var/lib/project-progress-platform/app.db
+sudo systemctl start project-progress-platform
+sudo journalctl -u project-progress-platform -n 100 --no-pager
+```
+
+服务启动时会自动执行数据库结构升级，并按照环境变量替换仍为默认值的登录密码。
+
+## 6. 日常更新
 
 ```bash
 cd /opt/project-progress-platform
-mkdir -p backups
-docker compose exec -T api node -e \
-  "const Database=require('better-sqlite3'); const db=new Database('/app/data/app.db',{readonly:true}); db.backup('/app/data/app-backup.db').then(()=>db.close())"
-docker compose cp api:/app/data/app-backup.db "backups/app-$(date +%Y%m%d-%H%M%S).db"
+./deploy/update.sh
 ```
 
-## 6. 域名与 HTTPS
+## 7. 数据备份
+
+```bash
+sudo mkdir -p /var/backups/project-progress-platform
+sudo chown project-progress:project-progress /var/backups/project-progress-platform
+sudo -u project-progress env DATA_DIR=/var/lib/project-progress-platform \
+  node /opt/project-progress-platform/scripts/backup-db.mjs \
+  "/var/backups/project-progress-platform/app-$(date +%Y%m%d-%H%M%S).db"
+```
+
+建议再用阿里云云盘快照或 OSS 保存异机副本。
+
+## 8. 域名与 HTTPS
 
 中国内地 ECS 使用域名对外提供 Web 服务前，需要按规定完成 ICP 备案。备案完成后，再将域名解析到 ECS 公网 IP，并配置 HTTPS 证书和 `443` 监听。
-
-未备案阶段可以先通过受控网络或公网 IP 做部署验收，不应以规避审核为目的对外提供未备案域名服务。

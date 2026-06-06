@@ -33,6 +33,6 @@ npm run dev
 
 ## 生产部署
 
-项目已提供 Docker Compose 生产配置，包含 Nginx、Node API 和 SQLite 持久卷。
+项目支持在单台 ECS 上原生部署：Nginx 提供前端，systemd 管理 Node API，SQLite 使用独立持久目录。
 
 详细步骤见 [deploy/README.md](deploy/README.md)。

@@ -1,0 +1,27 @@
+[Unit]
+Description=Project Progress Platform API
+After=network.target
+
+[Service]
+Type=simple
+User=project-progress
+Group=project-progress
+WorkingDirectory=/opt/project-progress-platform
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=4000
+Environment=DATA_DIR=/var/lib/project-progress-platform
+EnvironmentFile=/etc/project-progress-platform.env
+ExecStart=/usr/bin/node server/dist/app.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/project-progress-platform
+
+[Install]
+WantedBy=multi-user.target
