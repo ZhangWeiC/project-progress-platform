@@ -3,7 +3,7 @@ import { randomBytes, scryptSync } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 
-const dataDir = path.resolve(process.cwd(), 'server/data');
+const dataDir = path.resolve(process.env.DATA_DIR ?? path.join(process.cwd(), 'server/data'));
 mkdirSync(dataDir, { recursive: true });
 
 export const db = new Database(path.join(dataDir, 'app.db'));
@@ -410,6 +410,20 @@ function seedCredentials() {
     { employeeId: 'user-rao', loginName: 'raojiazhong' },
     { employeeId: 'user-li', loginName: 'lijiajun' }
   ];
+  const existingCredentials = db.prepare(
+    'SELECT employee_id, password_salt, password_hash FROM user_credential'
+  ).all() as Array<{ employee_id: string; password_salt: string; password_hash: string }>;
+  const hasDefaultPassword = existingCredentials.length === 0 || existingCredentials.some((credential) => {
+    const currentHash = scryptSync('123456', credential.password_salt, 64);
+    return currentHash.equals(Buffer.from(credential.password_hash, 'hex'));
+  });
+  const initialPassword = process.env.INITIAL_USER_PASSWORD?.trim();
+
+  if (process.env.NODE_ENV === 'production' && hasDefaultPassword && (!initialPassword || initialPassword.length < 12)) {
+    throw new Error('生产环境检测到默认账号密码，请设置至少 12 位的 INITIAL_USER_PASSWORD');
+  }
+
+  const seedPassword = initialPassword || '123456';
   const insert = db.prepare(
     `INSERT OR IGNORE INTO user_credential
      (employee_id, login_name, password_salt, password_hash, enabled)
@@ -417,8 +431,20 @@ function seedCredentials() {
   );
   for (const credential of credentials) {
     const salt = randomBytes(16).toString('hex');
-    const passwordHash = scryptSync('123456', salt, 64).toString('hex');
+    const passwordHash = scryptSync(seedPassword, salt, 64).toString('hex');
     insert.run(credential.employeeId, credential.loginName, salt, passwordHash);
+  }
+
+  if (initialPassword && existingCredentials.length > 0) {
+    const update = db.prepare(
+      'UPDATE user_credential SET password_salt = ?, password_hash = ? WHERE employee_id = ?'
+    );
+    for (const credential of existingCredentials) {
+      const defaultHash = scryptSync('123456', credential.password_salt, 64);
+      if (!defaultHash.equals(Buffer.from(credential.password_hash, 'hex'))) continue;
+      const salt = randomBytes(16).toString('hex');
+      update.run(salt, scryptSync(initialPassword, salt, 64).toString('hex'), credential.employee_id);
+    }
   }
 }
 
@@ -490,10 +516,15 @@ function seedTasksForCases() {
   insertMany('case_subtask', subtaskRows);
 
   insertMany('case_task', [
-    { id: 'TASK-CASE-001-design', project_case_id: 'CASE-202604-001', case_item_id: null, task_template_id: 'tt-design', name: '设计确认', task_type: 'design', owner_department_id: 'dept-design', assignee_id: 'user-wei-li', team_id: null, status: 'completed', progress: 100, is_delayed: 0, is_applicable: 1, include_in_progress: 1, source_row: 9, source_column: 'E', raw_import_value: '魏立', remark: '' },
-    { id: 'TASK-CASE-001-drawing', project_case_id: 'CASE-202604-001', case_item_id: null, task_template_id: 'tt-drawing', name: '图纸定审', task_type: 'drawing_review', owner_department_id: 'dept-design', assignee_id: 'user-wei-li', team_id: null, status: 'completed', progress: 100, is_delayed: 0, is_applicable: 1, include_in_progress: 1, source_row: 9, source_column: 'F', raw_import_value: '1', remark: '' },
-    { id: 'TASK-CASE-002-design', project_case_id: 'CASE-202604-002', case_item_id: null, task_template_id: 'tt-design', name: '设计确认', task_type: 'design', owner_department_id: 'dept-design', assignee_id: 'user-rao', team_id: null, status: 'completed', progress: 100, is_delayed: 0, is_applicable: 1, include_in_progress: 1, source_row: 19, source_column: 'E', raw_import_value: '饶家忠', remark: '' },
-    { id: 'TASK-CASE-002-drawing', project_case_id: 'CASE-202604-002', case_item_id: null, task_template_id: 'tt-drawing', name: '图纸定审', task_type: 'drawing_review', owner_department_id: 'dept-design', assignee_id: 'user-rao', team_id: null, status: 'completed', progress: 100, is_delayed: 0, is_applicable: 1, include_in_progress: 1, source_row: 19, source_column: 'F', raw_import_value: '1', remark: '' }
+    { id: 'TASK-CASE-001-design', project_case_id: 'CASE-202604-001', case_item_id: null, task_template_id: 'tt-design', name: '设计', task_type: 'design', owner_department_id: 'dept-design', assignee_id: 'user-wei-li', team_id: null, status: 'completed', progress: 100, is_delayed: 0, is_applicable: 1, include_in_progress: 1, source_row: 9, source_column: 'E', raw_import_value: '魏立', remark: '' },
+    { id: 'TASK-CASE-002-design', project_case_id: 'CASE-202604-002', case_item_id: null, task_template_id: 'tt-design', name: '设计', task_type: 'design', owner_department_id: 'dept-design', assignee_id: 'user-rao', team_id: null, status: 'completed', progress: 100, is_delayed: 0, is_applicable: 1, include_in_progress: 1, source_row: 19, source_column: 'E', raw_import_value: '饶家忠', remark: '' }
+  ]);
+
+  insertMany('case_subtask', [
+    { id: 'SUB-CASE-202604-001-st-design-confirm', case_task_id: 'TASK-CASE-001-design', subtask_template_id: 'st-design-confirm', parent_subtask_id: null, name: '设计深化', sort_order: 10, assignee_id: 'user-wei-li', team_id: null, status: 'completed', progress: 100, planned_quantity: null, completed_quantity: null, quantity_unit: null, recorded_weight: null, recorded_piece_count: null, is_applicable: 1, include_in_progress: 1, source_column: 'E', raw_import_value: '魏立', remark: '' },
+    { id: 'SUB-CASE-202604-001-st-drawing-review', case_task_id: 'TASK-CASE-001-design', subtask_template_id: 'st-drawing-review', parent_subtask_id: null, name: '图纸定审', sort_order: 20, assignee_id: 'user-wei-li', team_id: null, status: 'completed', progress: 100, planned_quantity: null, completed_quantity: null, quantity_unit: null, recorded_weight: null, recorded_piece_count: null, is_applicable: 1, include_in_progress: 1, source_column: 'F', raw_import_value: '1', remark: '' },
+    { id: 'SUB-CASE-202604-002-st-design-confirm', case_task_id: 'TASK-CASE-002-design', subtask_template_id: 'st-design-confirm', parent_subtask_id: null, name: '设计深化', sort_order: 10, assignee_id: 'user-rao', team_id: null, status: 'completed', progress: 100, planned_quantity: null, completed_quantity: null, quantity_unit: null, recorded_weight: null, recorded_piece_count: null, is_applicable: 1, include_in_progress: 1, source_column: 'E', raw_import_value: '饶家忠', remark: '' },
+    { id: 'SUB-CASE-202604-002-st-drawing-review', case_task_id: 'TASK-CASE-002-design', subtask_template_id: 'st-drawing-review', parent_subtask_id: null, name: '图纸定审', sort_order: 20, assignee_id: 'user-rao', team_id: null, status: 'completed', progress: 100, planned_quantity: null, completed_quantity: null, quantity_unit: null, recorded_weight: null, recorded_piece_count: null, is_applicable: 1, include_in_progress: 1, source_column: 'F', raw_import_value: '1', remark: '' }
   ]);
 
   const memberRows = [

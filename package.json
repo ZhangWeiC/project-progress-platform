@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@9.15.5",
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:web\"",
     "dev:server": "npm run build:server && node server/dist/app.js",
@@ -11,6 +12,7 @@
     "build:server": "tsc -p server/tsconfig.json",
     "build:web": "tsc -p web/tsconfig.json && vite build --config web/vite.config.ts",
     "start": "node server/dist/app.js",
+    "backup:data": "node scripts/backup-db.mjs",
     "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit"
   },
   "dependencies": {

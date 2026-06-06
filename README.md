@@ -30,3 +30,9 @@ npm run dev
 - WorkLog 日报录入
 - Exception 异常情况
 - H5 我的任务、日报录入、异常处理
+
+## 生产部署
+
+项目已提供 Docker Compose 生产配置，包含 Nginx、Node API 和 SQLite 持久卷。
+
+详细步骤见 [deploy/README.md](deploy/README.md)。

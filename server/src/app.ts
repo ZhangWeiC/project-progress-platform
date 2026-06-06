@@ -9,8 +9,12 @@ import { login, logout } from './auth.js';
 
 initializeDatabase();
 
-const app = Fastify({ logger: true });
-await app.register(cors, { origin: true });
+const app = Fastify({ logger: true, trustProxy: true });
+const corsOrigins = process.env.CORS_ORIGIN
+  ?.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+await app.register(cors, { origin: corsOrigins?.length ? corsOrigins : false });
 await app.register(multipart);
 
 app.setErrorHandler((error, _request, reply) => {
