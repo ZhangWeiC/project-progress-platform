@@ -37,7 +37,7 @@ corepack prepare pnpm@9.15.5 --activate
 pnpm --version
 ```
 
-systemd 文件默认使用 `/usr/bin/node`，如果 `command -v node` 输出其他路径，需要同步修改服务文件中的 `ExecStart`。
+systemd 文件默认使用 `/usr/local/bin/node`，如果 `command -v node` 输出其他路径，需要同步修改服务文件中的 `ExecStart`。
 
 ## 2. 拉取和构建
 

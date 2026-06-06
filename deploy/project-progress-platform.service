@@ -12,7 +12,7 @@ Environment=HOST=127.0.0.1
 Environment=PORT=4000
 Environment=DATA_DIR=/var/lib/project-progress-platform
 EnvironmentFile=/etc/project-progress-platform.env
-ExecStart=/usr/bin/node server/dist/app.js
+ExecStart=/usr/local/bin/node server/dist/app.js
 Restart=always
 RestartSec=5
 TimeoutStopSec=20
