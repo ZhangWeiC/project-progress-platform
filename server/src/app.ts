@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { db, initializeDatabase, makeId, nowIso } from './db.js';
 import { getCurrentUser, getMatrix, getTaskDetails, updateProgress, assertCanReadCase } from './services.js';
 import { confirmExcelImport, createExcelImport, getImportPreview } from './importer.js';
+import { login, logout } from './auth.js';
 
 initializeDatabase();
 
@@ -14,7 +15,8 @@ await app.register(multipart);
 
 app.setErrorHandler((error, _request, reply) => {
   const statusCode =
-    error.name === 'PERMISSION_DENIED' ? 403 :
+    error.name === 'AUTH_REQUIRED' || error.name === 'AUTH_INVALID' ? 401 :
+      error.name === 'PERMISSION_DENIED' ? 403 :
       error.name === 'NOT_FOUND' ? 404 :
         error.name === 'VALIDATION_ERROR' ? 400 :
           500;
@@ -25,7 +27,32 @@ app.setErrorHandler((error, _request, reply) => {
   });
 });
 
+const publicApiPaths = new Set(['/api/health', '/api/auth/login', '/api/auth/logout']);
+
+app.addHook('preHandler', async (request) => {
+  const path = request.url.split('?')[0];
+  if (path.startsWith('/api/') && !publicApiPaths.has(path)) {
+    getCurrentUser(request.headers);
+  }
+});
+
 app.get('/api/health', async () => ({ ok: true }));
+
+app.post('/api/auth/login', async (request) => {
+  const body = z.object({
+    login_name: z.string().trim().min(1),
+    password: z.string().min(1)
+  }).parse(request.body);
+  return login(body.login_name, body.password);
+});
+
+app.post('/api/auth/logout', async (request) => {
+  return logout(request.headers.authorization);
+});
+
+app.get('/api/auth/me', async (request) => {
+  return getCurrentUser(request.headers);
+});
 
 app.get('/api/me', async (request) => {
   return getCurrentUser(request.headers);

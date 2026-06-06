@@ -1,7 +1,8 @@
-import { AppstoreOutlined, BarChartOutlined, DashboardOutlined, ExceptionOutlined, FileExcelOutlined, FormOutlined, SettingOutlined } from '@ant-design/icons';
-import { Layout, Menu, Select, Space, Typography } from 'antd';
+import { AppstoreOutlined, BarChartOutlined, DashboardOutlined, ExceptionOutlined, FileExcelOutlined, FormOutlined, LogoutOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons';
+import { Avatar, Button, Layout, Menu, Space, Typography } from 'antd';
+import { useQueryClient } from '@tanstack/react-query';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { getCurrentUserId, setCurrentUserId } from '../../services/api';
+import { getAuthSession, logoutRequest } from '../../services/auth';
 
 const { Header, Sider, Content } = Layout;
 
@@ -18,12 +19,14 @@ const menuItems = [
 export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
+  const user = getAuthSession()?.user;
   const selectedKey = menuItems.find((item) => location.pathname.startsWith(item.key))?.key ?? '/dashboard';
 
   return (
     <Layout className="app-shell">
       <Sider width={184} theme="light" className="app-sider">
-        <div className="brand">CaseTask</div>
+        <div className="brand">项目进度平台</div>
         <Menu
           mode="inline"
           selectedKeys={[selectedKey]}
@@ -33,24 +36,19 @@ export function AppShell() {
       </Sider>
       <Layout>
         <Header className="app-header">
-          <Typography.Text strong>项目进度与工时协作平台</Typography.Text>
+          <Typography.Text strong>项目进度平台</Typography.Text>
           <Space>
-            <Typography.Text type="secondary">当前用户</Typography.Text>
-            <Select
-              size="small"
-              value={getCurrentUserId()}
-              style={{ width: 132 }}
-              onChange={(value) => {
-                setCurrentUserId(value);
-                window.location.reload();
+            <Avatar size={28} icon={<UserOutlined />} />
+            <Typography.Text>{user?.name ?? '-'}</Typography.Text>
+            <Button
+              type="text"
+              icon={<LogoutOutlined />}
+              title="退出登录"
+              onClick={async () => {
+                await logoutRequest();
+                queryClient.clear();
+                navigate('/login', { replace: true });
               }}
-              options={[
-                { value: 'user-admin', label: '管理员' },
-                { value: 'user-zhang', label: '张剑华' },
-                { value: 'user-team2', label: '二组班组长' },
-                { value: 'user-rao', label: '饶家忠' },
-                { value: 'user-li', label: '李嘉俊' }
-              ]}
             />
           </Space>
         </Header>

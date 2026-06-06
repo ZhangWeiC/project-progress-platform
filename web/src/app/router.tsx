@@ -13,11 +13,14 @@ import { MobileTaskListPage } from '../pages/mobile/MobileTaskListPage';
 import { MobileWorkLogPage } from '../pages/mobile/MobileWorkLogPage';
 import { MobileExceptionsPage } from '../pages/mobile/MobileExceptionsPage';
 import { MobileCaseSummaryPage } from '../pages/mobile/MobileCaseSummaryPage';
+import { LoginPage } from '../pages/login/LoginPage';
+import { RequireAuth } from '../components/auth/RequireAuth';
 
 export const router = createBrowserRouter([
+  { path: '/login', element: <LoginPage /> },
   {
     path: '/',
-    element: <AppShell />,
+    element: <RequireAuth><AppShell /></RequireAuth>,
     children: [
       { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: 'dashboard', element: <DashboardPage /> },
@@ -31,7 +34,7 @@ export const router = createBrowserRouter([
   },
   {
     path: '/m',
-    element: <MobileShell />,
+    element: <RequireAuth><MobileShell /></RequireAuth>,
     children: [
       { index: true, element: <MobileHomePage /> },
       { path: 'tasks', element: <MobileTaskListPage /> },

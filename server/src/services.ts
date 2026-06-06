@@ -1,4 +1,5 @@
 import { db, makeId, nowIso, TargetType } from './db.js';
+import { authenticate } from './auth.js';
 
 export type CurrentUser = {
   id: string;
@@ -7,9 +8,7 @@ export type CurrentUser = {
 };
 
 export function getCurrentUser(headers: Record<string, unknown>): CurrentUser {
-  const requested = typeof headers['x-user-id'] === 'string' ? headers['x-user-id'] : 'user-admin';
-  const user = db.prepare('SELECT id, role, name FROM employee WHERE id = ?').get(requested) as CurrentUser | undefined;
-  return user ?? { id: 'user-admin', role: 'admin', name: '管理员' };
+  return authenticate(headers.authorization);
 }
 
 export function assertCanReadCase(user: CurrentUser, projectCaseId: string) {

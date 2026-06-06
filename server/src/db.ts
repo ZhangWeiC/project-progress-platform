@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { randomBytes, scryptSync } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 
@@ -24,6 +25,23 @@ export function initializeDatabase() {
       department_id TEXT,
       role TEXT NOT NULL,
       FOREIGN KEY (department_id) REFERENCES department(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS user_credential (
+      employee_id TEXT PRIMARY KEY,
+      login_name TEXT NOT NULL UNIQUE,
+      password_salt TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      FOREIGN KEY (employee_id) REFERENCES employee(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS auth_session (
+      token_hash TEXT PRIMARY KEY,
+      employee_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY (employee_id) REFERENCES employee(id)
     );
 
     CREATE TABLE IF NOT EXISTS team (
@@ -278,9 +296,11 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_subtask_task ON case_subtask(case_task_id);
     CREATE INDEX IF NOT EXISTS idx_work_log_task ON work_log_entry(case_task_id);
     CREATE INDEX IF NOT EXISTS idx_exception_task ON exception_record(case_task_id);
+    CREATE INDEX IF NOT EXISTS idx_auth_session_employee ON auth_session(employee_id);
   `);
 
   seedDatabase();
+  seedCredentials();
   migrateWorkflowModel();
 }
 
@@ -380,6 +400,26 @@ function seedDatabase() {
 
   seedTasksForCases();
   seedLogsAndExceptions();
+}
+
+function seedCredentials() {
+  const credentials = [
+    { employeeId: 'user-admin', loginName: 'admin' },
+    { employeeId: 'user-zhang', loginName: 'zhangjianhua' },
+    { employeeId: 'user-team2', loginName: 'team2' },
+    { employeeId: 'user-rao', loginName: 'raojiazhong' },
+    { employeeId: 'user-li', loginName: 'lijiajun' }
+  ];
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO user_credential
+     (employee_id, login_name, password_salt, password_hash, enabled)
+     VALUES (?, ?, ?, ?, 1)`
+  );
+  for (const credential of credentials) {
+    const salt = randomBytes(16).toString('hex');
+    const passwordHash = scryptSync('123456', salt, 64).toString('hex');
+    insert.run(credential.employeeId, credential.loginName, salt, passwordHash);
+  }
 }
 
 function seedTasksForCases() {
