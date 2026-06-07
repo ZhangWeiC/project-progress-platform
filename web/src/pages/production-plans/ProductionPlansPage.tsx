@@ -1,7 +1,6 @@
 import {
   DeleteOutlined,
   EditOutlined,
-  LinkOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined
@@ -172,7 +171,7 @@ export function ProductionPlansPage() {
     [board?.dates, deleteMutation]
   );
   const timelineWidth = Math.max((board?.dates.length ?? 0) * GANTT_DAY_WIDTH, 320);
-  const scrollX = 64 + 260 + 250 + timelineWidth + 390;
+  const scrollX = 52 + 280 + timelineWidth + 390;
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -352,44 +351,23 @@ function buildGanttColumns(
       dataIndex: 'sort_order',
       key: 'sort_order',
       fixed: 'left',
-      width: 64,
+      width: 52,
       align: 'center'
     },
     {
-      title: '排期活动',
-      dataIndex: 'name',
-      key: 'name',
+      title: '排期任务',
+      key: 'schedule',
       fixed: 'left',
-      width: 260,
-      render: (value: string, row) => (
-        <Space direction="vertical" size={0} className="production-plan-title-cell">
-          <Tooltip title={value}>
-            <Typography.Text strong className="matrix-ellipsis-text">{value}</Typography.Text>
-          </Tooltip>
-          <Typography.Text type="secondary" className="production-plan-meta">
-            {row.planned_start_date} - {row.planned_end_date}
-          </Typography.Text>
-        </Space>
-      )
-    },
-    {
-      title: '关联项目 / 子项目 / 阶段',
-      key: 'project',
-      fixed: 'left',
-      width: 250,
+      width: 280,
       render: (_value, row) => (
-        <Space direction="vertical" size={0} className="production-plan-title-cell">
-          <Tooltip title={row.project_case_name ?? '-'}>
-            <Typography.Text className="matrix-ellipsis-text">
-              {row.project_case_name ? <LinkOutlined className="muted-icon" /> : null} {row.project_case_name ?? '-'}
+        <Tooltip title={<ScheduleDetail row={row} />} placement="right">
+          <Space direction="vertical" size={0} className="production-plan-title-cell">
+            <Typography.Text strong className="matrix-ellipsis-text">{row.name}</Typography.Text>
+            <Typography.Text type="secondary" className="matrix-ellipsis-text production-plan-meta">
+              {compactScheduleSummary(row)}
             </Typography.Text>
-          </Tooltip>
-          <Tooltip title={`${row.case_item_name ?? '-'} / ${row.task_name ?? '-'}`}>
-            <Typography.Text type="secondary" className="matrix-ellipsis-text">
-              {row.case_item_name ?? '-'} / {row.task_name ?? '-'}
-            </Typography.Text>
-          </Tooltip>
-        </Space>
+          </Space>
+        </Tooltip>
       )
     },
     {
@@ -516,6 +494,27 @@ function buildBacklogColumns(onSchedule: (item: ProductionPlanBacklogItem) => vo
       )
     }
   ];
+}
+
+function compactScheduleSummary(row: ProductionPlanItem) {
+  return [row.project_case_name, row.case_item_name, row.task_name].filter(Boolean).join(' / ') || '-';
+}
+
+function ScheduleDetail({ row }: { row: ProductionPlanItem }) {
+  const progress = Math.round(Number(row.progress ?? 0));
+  return (
+    <div className="schedule-detail-tooltip">
+      <div className="schedule-detail-title">{row.name}</div>
+      <div><span>项目：</span>{row.project_case_name ?? '-'}</div>
+      <div><span>子项目：</span>{row.case_item_name ?? '-'}</div>
+      <div><span>阶段：</span>{row.task_name ?? '-'}</div>
+      <div><span>排期：</span>{row.planned_start_date} 至 {row.planned_end_date}，{row.duration_days}天</div>
+      <div><span>班组：</span>{row.assigned_team_name ?? '-'}</div>
+      <div><span>进度：</span>{progress}%</div>
+      <div><span>状态：</span>{STATUS_LABELS[row.effective_status] ?? row.effective_status}</div>
+      {row.remark ? <div><span>备注：</span>{row.remark}</div> : null}
+    </div>
+  );
 }
 
 function TimelineHeader({ dates }: { dates: string[] }) {
