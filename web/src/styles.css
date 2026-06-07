@@ -363,6 +363,23 @@ body {
   line-height: 1.2;
 }
 
+.schedule-detail-tooltip {
+  max-width: 360px;
+  color: #ffffff;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.schedule-detail-tooltip span {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.schedule-detail-title {
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .production-plan-date-header {
   background: #f3f7ec !important;
 }
