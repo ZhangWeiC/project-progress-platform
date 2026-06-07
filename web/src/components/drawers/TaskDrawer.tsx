@@ -25,6 +25,7 @@ export function TaskDrawer({ taskId, open, onClose, matrixCaseId }: Props) {
       message.success('进度已更新');
       await queryClient.invalidateQueries({ queryKey: ['task', taskId] });
       if (matrixCaseId) await queryClient.invalidateQueries({ queryKey: ['matrix', matrixCaseId] });
+      await queryClient.invalidateQueries({ queryKey: ['matrix', 'all'] });
     },
     onError: (error) => message.error(error.message)
   });

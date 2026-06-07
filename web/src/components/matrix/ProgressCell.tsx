@@ -11,6 +11,7 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
   if (!cell) return <span className="empty-cell">-</span>;
   const value = typeof cell.value === 'number' ? cell.value : null;
   const editable = Boolean(cell.editable);
+  const isAggregate = !cell.targetId;
 
   if (cell.targetId && cell.taskId) {
     return (
@@ -25,10 +26,9 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
             <span className="empty-cell">-</span>
           ) : (
             <Progress
-              type="circle"
               percent={Math.round(value)}
-              size={28}
-              strokeWidth={10}
+              size="small"
+              strokeWidth={5}
               status={value >= 100 ? 'success' : value <= 0 ? 'normal' : 'active'}
               format={(percent) => `${percent}%`}
             />
@@ -39,7 +39,22 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
             </Tooltip>
           )}
         </Space>
+        {cell.ownerName && <span className="progress-owner">{cell.ownerName}</span>}
       </Button>
+    );
+  }
+
+  if (isAggregate && value !== null) {
+    return (
+      <div className="progress-cell-summary">
+        <Progress
+          percent={Math.round(value)}
+          size="small"
+          strokeWidth={5}
+          status={value >= 100 ? 'success' : value <= 0 ? 'normal' : 'active'}
+        />
+        {cell.ownerName && <span className="progress-owner">{cell.ownerName}</span>}
+      </div>
     );
   }
 

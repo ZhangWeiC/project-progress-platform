@@ -3,6 +3,8 @@ import type { ExceptionRecord, ImportTaskPreview, LookupResponse, MatrixResponse
 
 export const fetchCases = () => apiGet<ProjectCase[]>('/api/cases');
 
+export const fetchAllMatrix = () => apiGet<MatrixResponse>('/api/cases/matrix');
+
 export const fetchCaseMatrix = (caseId: string) => apiGet<MatrixResponse>(`/api/cases/${caseId}/matrix`);
 
 export const fetchTaskDetails = (taskId: string) => apiGet<TaskDetails>(`/api/tasks/${taskId}`);

@@ -109,10 +109,12 @@ body {
   font-weight: 600;
   text-align: center;
   white-space: nowrap;
+  padding: 4px 6px;
+  line-height: 1.2;
 }
 
 .matrix-card .ant-table-tbody > tr > td {
-  padding: 4px 6px;
+  padding: 3px 5px;
   white-space: nowrap;
 }
 
@@ -120,10 +122,118 @@ body {
   background: #fff8f0;
 }
 
+.matrix-project-row > td {
+  background: #f4f7fb;
+  font-weight: 600;
+}
+
+.matrix-project-row.row-has-exception > td {
+  background: #fff4e8;
+}
+
+.matrix-fixed-left {
+  background: #fff;
+}
+
+.matrix-fixed-right {
+  background: #fff;
+}
+
+.matrix-row-title {
+  max-width: 100%;
+  line-height: 1.15;
+}
+
+.matrix-row-title .ant-typography {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage-title {
+  display: inline-block;
+  font-size: 12px;
+}
+
+.matrix-stage-header.stage-blue,
+.matrix-substage-header.stage-blue,
+.matrix-stage-cell.stage-blue {
+  background: #f1f7ff;
+}
+
+.matrix-stage-header.stage-cyan,
+.matrix-substage-header.stage-cyan,
+.matrix-stage-cell.stage-cyan {
+  background: #eefcff;
+}
+
+.matrix-stage-header.stage-green,
+.matrix-substage-header.stage-green,
+.matrix-stage-cell.stage-green {
+  background: #f0faf4;
+}
+
+.matrix-stage-header.stage-lime,
+.matrix-substage-header.stage-lime,
+.matrix-stage-cell.stage-lime {
+  background: #f8fbeb;
+}
+
+.matrix-stage-header.stage-gold,
+.matrix-substage-header.stage-gold,
+.matrix-stage-cell.stage-gold {
+  background: #fff9e6;
+}
+
+.matrix-stage-header.stage-orange,
+.matrix-substage-header.stage-orange,
+.matrix-stage-cell.stage-orange {
+  background: #fff3e8;
+}
+
+.matrix-stage-header.stage-purple,
+.matrix-substage-header.stage-purple,
+.matrix-stage-cell.stage-purple {
+  background: #f7f2ff;
+}
+
+.matrix-stage-header {
+  border-left: 2px solid rgba(37, 99, 235, 0.28) !important;
+}
+
 .progress-cell {
   width: 100%;
-  height: 36px;
+  min-height: 34px;
+  height: auto;
   padding: 0;
+  line-height: 1;
+}
+
+.progress-cell .ant-space {
+  width: 100%;
+}
+
+.progress-cell .ant-progress,
+.progress-cell-summary .ant-progress {
+  min-width: 62px;
+}
+
+.progress-cell-summary {
+  min-height: 34px;
+  line-height: 1;
+}
+
+.progress-owner {
+  display: block;
+  max-width: 86px;
+  margin-top: 2px;
+  color: #667085;
+  font-size: 10px;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .empty-cell {

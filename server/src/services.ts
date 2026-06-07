@@ -167,6 +167,10 @@ function roundProgress(value: number) {
   return Math.round(value * 10) / 10;
 }
 
+function progressStatus(progress: number) {
+  return progress >= 100 ? 'completed' : progress > 0 ? 'in_progress' : 'not_started';
+}
+
 export function getTaskDetails(taskId: string, user?: CurrentUser) {
   const task = db
     .prepare(
@@ -230,6 +234,276 @@ export function getTaskDetails(taskId: string, user?: CurrentUser) {
     )
     .all(taskId, taskId);
   return { task, subtasks: subtasksWithPermission, workLogs, exceptions, progressLogs };
+}
+
+type MatrixProject = {
+  id: string;
+  name: string;
+  status: string;
+  total_progress: number;
+  delivery_status: string | null;
+  business_owner_name: string | null;
+  design_owner_name: string | null;
+  open_exception_count: number;
+};
+
+type MatrixItem = {
+  id: string;
+  project_case_id: string;
+  name: string;
+  progress: number;
+  status: string;
+  delivery_status: string | null;
+  open_exception_count: number;
+};
+
+type MatrixTemplateColumn = {
+  task_type: string;
+  task_name: string;
+  generation_scope: string;
+  subtask_template_id: string;
+  subtask_name: string;
+  sort_order: number;
+};
+
+type MatrixTask = {
+  id: string;
+  task_type: string;
+  name: string;
+  progress: number;
+  status: string;
+  assignee_name: string | null;
+  team_name: string | null;
+  department_name: string | null;
+};
+
+type MatrixSubtask = {
+  id: string;
+  case_task_id: string;
+  subtask_template_id: string;
+  progress: number;
+  status: string;
+  assignee_name: string | null;
+  team_name: string | null;
+};
+
+type MatrixCell = {
+  value: string | number | null;
+  status?: string;
+  editable?: boolean;
+  targetType?: 'task' | 'subtask';
+  targetId?: string;
+  taskId?: string;
+  ownerName?: string;
+  departmentName?: string | null;
+  aggregateCount?: number;
+};
+
+type MatrixRow = {
+  row_id: string;
+  row_type: 'project' | 'item';
+  project_case_id: string;
+  case_item_id: string;
+  item_progress: number;
+  cells: Record<string, MatrixCell>;
+  open_exception_count: number;
+  children?: MatrixRow[];
+};
+
+export function getAllMatrix(user: CurrentUser) {
+  const projects = getVisibleMatrixProjects(user);
+  const templates = getMatrixTemplateColumns();
+  const columns = buildMatrixColumns(templates);
+  const rows = projects.map((project) => buildProjectMatrixRow(project, templates, user));
+  const itemCount = rows.reduce((sum, row) => sum + (row.children?.length ?? 0), 0);
+  const openExceptionCount = rows.reduce((sum, row) => sum + row.open_exception_count, 0);
+  return {
+    columns,
+    rows,
+    summary: {
+      project_count: rows.length,
+      item_count: itemCount,
+      open_exception_count: openExceptionCount
+    }
+  };
+}
+
+function getVisibleMatrixProjects(user: CurrentUser) {
+  const sql = `SELECT pc.*, b.name as business_owner_name, de.name as design_owner_name,
+                      (SELECT COUNT(*) FROM exception_record ex
+                       WHERE ex.project_case_id = pc.id
+                         AND ex.status NOT IN ('resolved', 'closed', 'cancelled')) as open_exception_count
+               FROM project_case pc
+               LEFT JOIN employee b ON b.id = pc.business_owner_id
+               LEFT JOIN employee de ON de.id = pc.design_owner_id
+               ${user.role === 'admin' ? '' : 'JOIN project_case_member m ON m.project_case_id = pc.id'}
+               ${user.role === 'admin' ? '' : 'WHERE m.user_id = ?'}
+               ORDER BY pc.source_seq, pc.id`;
+  return (user.role === 'admin'
+    ? db.prepare(sql).all()
+    : db.prepare(sql).all(user.id)) as MatrixProject[];
+}
+
+function getMatrixTemplateColumns() {
+  return db
+    .prepare(
+      `SELECT tt.task_type, tt.name as task_name, tt.generation_scope,
+              st.id as subtask_template_id, st.name as subtask_name, st.sort_order
+       FROM task_template tt
+       JOIN subtask_template st ON st.task_template_id = tt.id
+       ORDER BY tt.sort_order, st.sort_order`
+    )
+    .all() as MatrixTemplateColumn[];
+}
+
+function buildMatrixColumns(templates: MatrixTemplateColumn[]) {
+  return [
+    { key: 'case_name', title: '项目', frozen: 'left' },
+    { key: 'case_item_name', title: '子项目', frozen: 'left' },
+    ...templates.map((column, index) => ({
+      key: `${column.task_type}.${column.subtask_template_id}`,
+      title: column.subtask_name,
+      group: column.task_name,
+      taskType: column.task_type,
+      groupIndex: index
+    })),
+    { key: 'delivery_status', title: '发货情况', frozen: 'right' },
+    { key: 'open_exception_count', title: '异常', frozen: 'right' }
+  ];
+}
+
+function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplateColumn[], user: CurrentUser): MatrixRow {
+  const items = db
+    .prepare(
+      `SELECT ci.*,
+              (SELECT COUNT(*) FROM exception_record ex
+               WHERE ex.case_item_id = ci.id
+                 AND ex.status NOT IN ('resolved', 'closed', 'cancelled')) as open_exception_count
+       FROM case_item ci
+       WHERE ci.project_case_id = ?
+       ORDER BY ci.source_row, ci.id`
+    )
+    .all(project.id) as MatrixItem[];
+  const caseTasks = getMatrixTasks(project.id, null);
+  const children = items.map((item) => buildItemMatrixRow(project, item, caseTasks, templates, user));
+  const cells: Record<string, MatrixCell> = {
+    case_name: {
+      value: project.name,
+      status: project.status,
+      ownerName: compactOwners([project.business_owner_name, project.design_owner_name]),
+      aggregateCount: children.length
+    },
+    case_item_name: {
+      value: `${children.length} 个子项目`,
+      status: project.status
+    },
+    delivery_status: { value: project.delivery_status ?? '' },
+    open_exception_count: { value: project.open_exception_count }
+  };
+
+  for (const template of templates) {
+    const key = `${template.task_type}.${template.subtask_template_id}`;
+    const childCells = children
+      .map((child) => child.cells[key])
+      .filter((cell): cell is MatrixCell => Boolean(cell) && typeof cell.value === 'number');
+    if (childCells.length > 0) {
+      const average = roundProgress(childCells.reduce((sum, cell) => sum + Number(cell.value), 0) / childCells.length);
+      cells[key] = {
+        value: average,
+        status: progressStatus(average),
+        ownerName: compactOwners(childCells.map((cell) => cell.ownerName)),
+        aggregateCount: childCells.length
+      };
+    }
+  }
+
+  return {
+    row_id: `PROJECT-${project.id}`,
+    row_type: 'project',
+    project_case_id: project.id,
+    case_item_id: `PROJECT-${project.id}`,
+    item_progress: project.total_progress,
+    cells,
+    open_exception_count: project.open_exception_count,
+    children
+  };
+}
+
+function buildItemMatrixRow(project: MatrixProject, item: MatrixItem, caseTasks: MatrixTask[], templates: MatrixTemplateColumn[], user: CurrentUser): MatrixRow {
+  const itemTasks = getMatrixTasks(project.id, item.id);
+  const tasks = [...caseTasks, ...itemTasks];
+  const cells: Record<string, MatrixCell> = {
+    case_name: { value: '', ownerName: compactOwners([project.business_owner_name, project.design_owner_name]) },
+    case_item_name: { value: item.name, status: item.status, aggregateCount: Math.round(item.progress) },
+    delivery_status: { value: item.delivery_status ?? '' },
+    open_exception_count: { value: item.open_exception_count }
+  };
+
+  for (const task of tasks) {
+    const subtasks = getMatrixSubtasks(task.id);
+    for (const subtask of subtasks) {
+      const key = `${task.task_type}.${subtask.subtask_template_id}`;
+      if (!templates.some((template) => `${template.task_type}.${template.subtask_template_id}` === key)) continue;
+      cells[key] = {
+        value: subtask.progress,
+        status: subtask.status,
+        editable: canEditSubtask(user, subtask.id),
+        targetType: 'subtask',
+        targetId: subtask.id,
+        taskId: task.id,
+        ownerName: ownerLabel(subtask, task),
+        departmentName: task.department_name
+      };
+    }
+  }
+
+  return {
+    row_id: item.id,
+    row_type: 'item',
+    project_case_id: project.id,
+    case_item_id: item.id,
+    item_progress: item.progress,
+    cells,
+    open_exception_count: item.open_exception_count
+  };
+}
+
+function getMatrixTasks(projectCaseId: string, itemId: string | null) {
+  const itemCondition = itemId === null ? 't.case_item_id IS NULL' : 't.case_item_id = ?';
+  return db
+    .prepare(
+      `SELECT t.*, e.name as assignee_name, tm.name as team_name, d.name as department_name
+       FROM case_task t
+       LEFT JOIN employee e ON e.id = t.assignee_id
+       LEFT JOIN team tm ON tm.id = t.team_id
+       LEFT JOIN department d ON d.id = t.owner_department_id
+       WHERE t.project_case_id = ? AND ${itemCondition}
+       ORDER BY t.id`
+    )
+    .all(...(itemId === null ? [projectCaseId] : [projectCaseId, itemId])) as MatrixTask[];
+}
+
+function getMatrixSubtasks(taskId: string) {
+  return db
+    .prepare(
+      `SELECT s.*, e.name as assignee_name, tm.name as team_name
+       FROM case_subtask s
+       LEFT JOIN employee e ON e.id = s.assignee_id
+       LEFT JOIN team tm ON tm.id = s.team_id
+       WHERE s.case_task_id = ?
+       ORDER BY s.sort_order`
+    )
+    .all(taskId) as MatrixSubtask[];
+}
+
+function ownerLabel(subtask: MatrixSubtask, task: MatrixTask) {
+  return subtask.assignee_name ?? subtask.team_name ?? task.assignee_name ?? task.team_name ?? task.department_name ?? '';
+}
+
+function compactOwners(values: Array<string | null | undefined>) {
+  const owners = Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+  if (owners.length <= 2) return owners.join(' / ');
+  return `${owners.slice(0, 2).join(' / ')} +${owners.length - 2}`;
 }
 
 export function getMatrix(projectCaseId: string, user: CurrentUser) {

@@ -2,8 +2,9 @@ export type MatrixColumn = {
   key: string;
   title: string;
   group?: string;
-  frozen?: boolean;
+  frozen?: boolean | 'left' | 'right';
   taskType?: string;
+  groupIndex?: number;
 };
 
 export type MatrixCell = {
@@ -13,20 +14,31 @@ export type MatrixCell = {
   targetType?: 'task' | 'subtask';
   targetId?: string;
   taskId?: string;
+  ownerName?: string;
+  departmentName?: string | null;
+  aggregateCount?: number;
 };
 
 export type MatrixRow = {
+  row_id?: string;
+  row_type?: 'project' | 'item';
   project_case_id: string;
   case_item_id: string;
   item_progress: number;
   cells: Record<string, MatrixCell>;
   open_exception_count: number;
+  children?: MatrixRow[];
 };
 
 export type MatrixResponse = {
-  projectCase: ProjectCase;
+  projectCase?: ProjectCase;
   columns: MatrixColumn[];
   rows: MatrixRow[];
+  summary?: {
+    project_count: number;
+    item_count: number;
+    open_exception_count: number;
+  };
 };
 
 export type ProjectCase = {

@@ -3,7 +3,7 @@ import multipart from '@fastify/multipart';
 import Fastify from 'fastify';
 import { z } from 'zod';
 import { db, initializeDatabase, makeId, nowIso } from './db.js';
-import { getCurrentUser, getMatrix, getTaskDetails, updateProgress, assertCanReadCase } from './services.js';
+import { getAllMatrix, getCurrentUser, getMatrix, getTaskDetails, updateProgress, assertCanReadCase } from './services.js';
 import { confirmExcelImport, createExcelImport, getImportPreview } from './importer.js';
 import { login, logout } from './auth.js';
 
@@ -84,6 +84,11 @@ app.get('/api/cases', async (request) => {
      WHERE m.user_id = ?
      ORDER BY pc.source_seq`
   ).all(user.id);
+});
+
+app.get('/api/cases/matrix', async (request) => {
+  const user = getCurrentUser(request.headers);
+  return getAllMatrix(user);
 });
 
 app.get('/api/cases/:id', async (request) => {
