@@ -596,6 +596,16 @@ body {
   min-width: 0;
 }
 
+.schedule-backlog-modal-table .ant-table-thead > tr > th {
+  background: #f7f9fc !important;
+  font-size: 12px;
+}
+
+.schedule-backlog-modal-table .ant-table-tbody > tr > td {
+  padding: 8px !important;
+  vertical-align: top;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(160px, 1fr));
