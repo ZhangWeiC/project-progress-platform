@@ -17,6 +17,7 @@ import {
   getProjectCaseManageProfile,
   getTaskDetails,
   updateProductionPlanItem,
+  updateDeliveryInfo,
   updateProgress,
   updateProjectCase
 } from './services.js';
@@ -107,7 +108,9 @@ app.get('/api/cases', async (request) => {
 
 const projectCaseItemBody = z.object({
   id: z.string().nullable().optional(),
-  name: z.string().trim().min(1)
+  name: z.string().trim().min(1),
+  delivery_date: z.string().trim().nullable().optional(),
+  delivery_status: z.string().trim().nullable().optional()
 });
 const projectCaseStageOwnerBody = z.object({
   task_type: z.string().trim().min(1),
@@ -134,6 +137,12 @@ const projectCaseUpdateBody = z.object({
   ...projectCaseFields,
   name: z.string().trim().min(1).optional()
 });
+const deliveryInfoBody = z.object({
+  project_case_id: z.string().trim().min(1),
+  case_item_id: z.string().trim().nullable().optional(),
+  delivery_date: z.string().trim().nullable().optional(),
+  delivery_status: z.string().trim().nullable().optional()
+});
 
 app.post('/api/cases', async (request) => {
   const user = getCurrentUser(request.headers);
@@ -146,6 +155,12 @@ app.patch('/api/cases/:id', async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const body = projectCaseUpdateBody.parse(request.body);
   return updateProjectCase(id, body, user);
+});
+
+app.patch('/api/delivery-info', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const body = deliveryInfoBody.parse(request.body);
+  return updateDeliveryInfo(body, user);
 });
 
 app.delete('/api/cases/:id', async (request) => {

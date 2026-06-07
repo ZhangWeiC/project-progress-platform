@@ -67,6 +67,8 @@ export type ProjectCaseItem = {
   name: string;
   progress?: number;
   status?: string;
+  delivery_date?: string | null;
+  delivery_status?: string | null;
   source_row?: number | null;
 };
 

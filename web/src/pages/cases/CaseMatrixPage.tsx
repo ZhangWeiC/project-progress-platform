@@ -6,7 +6,7 @@ import { useMemo, useState } from 'react';
 import type { Key } from 'react';
 import { TaskDrawer } from '../../components/drawers/TaskDrawer';
 import { ProgressCell } from '../../components/matrix/ProgressCell';
-import { createProjectCase, deleteProjectCase, fetchAllMatrix, fetchCases, fetchLookups, fetchProjectCaseManageProfile, updateProjectCase } from '../../services/cases';
+import { createProjectCase, deleteProjectCase, fetchAllMatrix, fetchCases, fetchLookups, fetchProjectCaseManageProfile, updateDeliveryInfo, updateProjectCase } from '../../services/cases';
 import type { ProjectCasePayload } from '../../services/cases';
 import { getAuthSession } from '../../services/auth';
 import type { LookupResponse, MatrixCell, MatrixColumn, MatrixRow, ProjectCase, ProjectStageOwner } from '../../types';
@@ -19,9 +19,22 @@ type ProjectCaseFormValues = ProjectCasePayload & {
 
 type StageDefinition = Pick<ProjectStageOwner, 'task_type' | 'task_name' | 'generation_scope' | 'sort_order' | 'owner_department_name' | 'assignee_id' | 'team_id' | 'mixed'>;
 
+type DeliveryFormValues = {
+  delivery_date?: string | null;
+  delivery_status?: string | null;
+};
+
+type DeliveryEditorTarget = {
+  project_case_id: string;
+  case_item_id?: string | null;
+  title: string;
+};
+
 export function CaseMatrixPage() {
   const [form] = Form.useForm<ProjectCaseFormValues>();
+  const [deliveryForm] = Form.useForm<DeliveryFormValues>();
   const [openedTaskId, setOpenedTaskId] = useState<string>();
+  const [deliveryEditor, setDeliveryEditor] = useState<DeliveryEditorTarget | null>(null);
   const [expandedRowKeys, setExpandedRowKeys] = useState<Key[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [projectManagementOpen, setProjectManagementOpen] = useState(false);
@@ -87,6 +100,16 @@ export function CaseMatrixPage() {
       await refreshProjectQueries();
     }
   });
+  const deliveryMutation = useMutation({
+    mutationFn: updateDeliveryInfo,
+    onSuccess: async () => {
+      message.success('发货信息已更新');
+      setDeliveryEditor(null);
+      deliveryForm.resetFields();
+      await refreshProjectQueries();
+    },
+    onError: (error) => message.error(error.message)
+  });
 
   const openCreateProject = () => {
     setProjectManagementOpen(false);
@@ -122,10 +145,33 @@ export function CaseMatrixPage() {
       createMutation.mutate(payload);
     }
   };
+  const openDeliveryEditor = (row: MatrixRow) => {
+    if (!canManageProjects) return;
+    const title = row.row_type === 'project'
+      ? String(row.cells.case_name?.value ?? '项目')
+      : String(row.cells.case_item_name?.value ?? '子项目');
+    setDeliveryEditor({
+      project_case_id: row.project_case_id,
+      case_item_id: row.row_type === 'project' ? null : row.case_item_id,
+      title
+    });
+    deliveryForm.setFieldsValue({
+      delivery_date: stringCellValue(row.cells.delivery_date),
+      delivery_status: stringCellValue(row.cells.delivery_status)
+    });
+  };
+  const submitDeliveryForm = (values: DeliveryFormValues) => {
+    if (!deliveryEditor) return;
+    deliveryMutation.mutate({
+      ...deliveryEditor,
+      delivery_date: values.delivery_date ?? null,
+      delivery_status: values.delivery_status ?? null
+    });
+  };
 
   const tableColumns = useMemo(
-    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId),
-    [matrixQuery.data?.columns]
+    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjects, openDeliveryEditor),
+    [matrixQuery.data?.columns, canManageProjects]
   );
 
   return (
@@ -199,6 +245,27 @@ export function CaseMatrixPage() {
         open={Boolean(openedTaskId)}
         onClose={() => setOpenedTaskId(undefined)}
       />
+      <Modal
+        title={`编辑发货信息 - ${deliveryEditor?.title ?? ''}`}
+        open={Boolean(deliveryEditor)}
+        onCancel={() => {
+          setDeliveryEditor(null);
+          deliveryForm.resetFields();
+        }}
+        onOk={() => deliveryForm.submit()}
+        okText="保存"
+        confirmLoading={deliveryMutation.isPending}
+        destroyOnClose
+      >
+        <Form form={deliveryForm} layout="vertical" onFinish={submitDeliveryForm}>
+          <Form.Item label="发货时间" name="delivery_date">
+            <Input placeholder="YYYY-MM-DD" />
+          </Form.Item>
+          <Form.Item label="发货情况" name="delivery_status">
+            <Input placeholder="例如 已出货 / 部分待确认" />
+          </Form.Item>
+        </Form>
+      </Modal>
       <ProjectManagementModal
         open={projectManagementOpen}
         projects={casesQuery.data ?? []}
@@ -227,7 +294,12 @@ export function CaseMatrixPage() {
   );
 }
 
-function buildColumns(columns: MatrixColumn[], openTask: (taskId: string) => void): ColumnsType<MatrixRow> {
+function buildColumns(
+  columns: MatrixColumn[],
+  openTask: (taskId: string) => void,
+  canManageProjects: boolean,
+  onEditDelivery: (row: MatrixRow) => void
+): ColumnsType<MatrixRow> {
   const leftColumns = columns
     .filter((column) => column.frozen === 'left')
     .map((column) => ({
@@ -274,7 +346,7 @@ function buildColumns(columns: MatrixColumn[], openTask: (taskId: string) => voi
         onHeaderCell: () => ({ className: `matrix-substage-header stage-${stageColor}` }),
         onCell: () => ({ className: `matrix-stage-cell stage-${stageColor}` }),
         render: (_value: unknown, row: MatrixRow) => isPlainMatrixColumn(child)
-          ? renderPinnedCell(child.key, row)
+          ? <DeliveryInfoCell columnKey={child.key} row={row} editable={canManageProjects} onEdit={onEditDelivery} />
           : <ProgressCell cell={row.cells[child.key]} onOpenTask={openTask} />
       }))
     };
@@ -325,6 +397,34 @@ function renderPinnedCell(key: string, row: MatrixRow) {
     );
   }
   return value ? <EllipsisText text={String(value)} /> : <span className="empty-cell">-</span>;
+}
+
+function DeliveryInfoCell({
+  columnKey,
+  row,
+  editable,
+  onEdit
+}: {
+  columnKey: string;
+  row: MatrixRow;
+  editable: boolean;
+  onEdit: (row: MatrixRow) => void;
+}) {
+  const value = row.cells[columnKey]?.value;
+  const content = value ? <EllipsisText text={String(value)} /> : <span className="empty-cell">-</span>;
+  if (!editable) return content;
+  return (
+    <Tooltip title="点击编辑发货信息">
+      <button type="button" className="matrix-editable-text-cell" onClick={() => onEdit(row)}>
+        {content}
+      </button>
+    </Tooltip>
+  );
+}
+
+function stringCellValue(cell: MatrixCell | undefined) {
+  const value = cell?.value;
+  return value === null || value === undefined ? null : String(value);
 }
 
 type EllipsisTextProps = {
@@ -535,10 +635,15 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
           </Form.Item>
         </div>
 
-        <Divider orientation="left" plain>子项目名称</Divider>
+        <Divider orientation="left" plain>子项目发货信息</Divider>
         <Form.List name="items">
           {(fields, { add, remove }) => (
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <div className="project-item-header">
+                <Typography.Text type="secondary">子项目名称</Typography.Text>
+                <Typography.Text type="secondary">发货时间</Typography.Text>
+                <Typography.Text type="secondary">发货情况</Typography.Text>
+              </div>
               {fields.map((field) => (
                 <div className="project-item-row" key={field.key}>
                   <Form.Item name={[field.name, 'id']} hidden>
@@ -548,9 +653,15 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
                     {...field}
                     name={[field.name, 'name']}
                     rules={[{ required: true, message: '请输入子项目名称' }]}
-                    style={{ margin: 0, flex: 1 }}
+                    style={{ margin: 0 }}
                   >
                     <Input placeholder="请输入子项目名称" />
+                  </Form.Item>
+                  <Form.Item name={[field.name, 'delivery_date']} style={{ margin: 0 }}>
+                    <Input placeholder="YYYY-MM-DD" />
+                  </Form.Item>
+                  <Form.Item name={[field.name, 'delivery_status']} style={{ margin: 0 }}>
+                    <Input placeholder="已出货 / 待确认" />
                   </Form.Item>
                   <Form.Item noStyle shouldUpdate>
                     {({ getFieldValue }) => {
@@ -562,7 +673,7 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
                   </Form.Item>
                 </div>
               ))}
-              <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ name: '' })}>
+              <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ name: '', delivery_date: null, delivery_status: null })}>
                 新增子项目
               </Button>
             </Space>
@@ -604,7 +715,14 @@ function projectToForm(project: ProjectCase): ProjectCaseFormValues {
     estimated_weight: project.estimated_weight ?? null,
     delivery_date: project.delivery_date ?? null,
     delivery_status: project.delivery_status ?? null,
-    items: project.items?.length ? project.items.map((item) => ({ id: item.id, name: item.name })) : [{ name: '' }],
+    items: project.items?.length
+      ? project.items.map((item) => ({
+          id: item.id,
+          name: item.name,
+          delivery_date: item.delivery_date ?? null,
+          delivery_status: item.delivery_status ?? null
+        }))
+      : [{ name: '', delivery_date: null, delivery_status: null }],
     stage_owner_values: Object.fromEntries(
       (project.stage_owners ?? []).map((stage) => [stage.task_type, encodeOwnerValue(stage)])
     )
@@ -613,7 +731,12 @@ function projectToForm(project: ProjectCase): ProjectCaseFormValues {
 
 function normalizeProjectPayload(values: ProjectCaseFormValues, stages: StageDefinition[]): ProjectCasePayload {
   const items = (values.items ?? [])
-    .map((item) => ({ id: item.id ?? null, name: item.name?.trim() ?? '' }))
+    .map((item) => ({
+      id: item.id ?? null,
+      name: item.name?.trim() ?? '',
+      delivery_date: item.delivery_date ?? null,
+      delivery_status: item.delivery_status ?? null
+    }))
     .filter((item) => item.name);
   const stageOwners = stages.map((stage) => ({
     task_type: stage.task_type,
