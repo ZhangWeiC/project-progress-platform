@@ -32,7 +32,11 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
             </Tooltip>
           )}
         </Space>
-        {owner && <span className="progress-owner">{owner}</span>}
+        {owner && (
+          <Tooltip title={owner}>
+            <span className="progress-owner">{owner}</span>
+          </Tooltip>
+        )}
       </Button>
     );
   }
@@ -41,7 +45,11 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
     return (
       <div className="progress-cell-summary">
         <span className={valueClassName}>{formattedValue}</span>
-        {owner && <span className="progress-owner">{owner}</span>}
+        {owner && (
+          <Tooltip title={owner}>
+            <span className="progress-owner">{owner}</span>
+          </Tooltip>
+        )}
       </div>
     );
   }

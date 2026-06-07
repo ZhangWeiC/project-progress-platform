@@ -1,5 +1,5 @@
 import { CompressOutlined, ExpandAltOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
-import { Button, Card, Input, Space, Table, Tag, Typography } from 'antd';
+import { Button, Card, Input, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
@@ -164,30 +164,49 @@ function renderPinnedCell(key: string, row: MatrixRow) {
     return count > 0 ? <Tag color="red">{count}</Tag> : <span className="empty-cell">0</span>;
   }
   if (key === 'case_name') {
+    const text = value ? String(value) : row.row_type === 'item' ? '' : '-';
     return (
       <Space direction="vertical" size={0} className="matrix-row-title">
-        <Typography.Text strong={row.row_type === 'project'}>
-          {value ? String(value) : row.row_type === 'item' ? '' : '-'}
-        </Typography.Text>
+        <EllipsisText text={text} strong={row.row_type === 'project'} />
         {row.row_type === 'project' && cell?.ownerName && (
-          <Typography.Text type="secondary">{cell.ownerName}</Typography.Text>
+          <EllipsisText text={cell.ownerName} type="secondary" />
         )}
       </Space>
     );
   }
   if (key === 'case_item_name') {
+    const text = value ? String(value) : '-';
     return (
       <Space direction="vertical" size={0} className="matrix-row-title">
-        <Typography.Text strong={row.row_type === 'project'}>
-          {value ? String(value) : <span className="empty-cell">-</span>}
-        </Typography.Text>
+        <EllipsisText text={text} strong={row.row_type === 'project'} className={!value ? 'empty-cell' : undefined} />
         {row.row_type === 'item' && typeof cell?.aggregateCount === 'number' && (
-          <Typography.Text type="secondary">{cell.aggregateCount}%</Typography.Text>
+          <EllipsisText text={`${cell.aggregateCount}%`} type="secondary" />
         )}
       </Space>
     );
   }
-  return value ? <span>{String(value)}</span> : <span className="empty-cell">-</span>;
+  return value ? <EllipsisText text={String(value)} /> : <span className="empty-cell">-</span>;
+}
+
+type EllipsisTextProps = {
+  text: string;
+  strong?: boolean;
+  type?: 'secondary';
+  className?: string;
+};
+
+function EllipsisText({ text, strong, type, className }: EllipsisTextProps) {
+  const content = (
+    <Typography.Text
+      strong={strong}
+      type={type}
+      className={['matrix-ellipsis-text', className].filter(Boolean).join(' ')}
+    >
+      {text}
+    </Typography.Text>
+  );
+  if (!text || text === '-') return content;
+  return <Tooltip title={text}>{content}</Tooltip>;
 }
 
 function filterRows(rows: MatrixRow[], keyword: string) {

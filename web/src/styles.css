@@ -140,12 +140,21 @@ body {
 }
 
 .matrix-row-title {
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
   line-height: 1.15;
 }
 
-.matrix-row-title .ant-typography {
-  max-width: 180px;
+.matrix-row-title .ant-space-item {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.matrix-ellipsis-text {
+  display: block;
+  width: 100%;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -210,12 +219,24 @@ body {
   line-height: 1;
 }
 
+.progress-cell.ant-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
 .progress-cell .ant-space {
-  width: 100%;
+  width: auto;
   justify-content: center;
 }
 
 .progress-cell-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   min-height: 28px;
   line-height: 1;
 }
