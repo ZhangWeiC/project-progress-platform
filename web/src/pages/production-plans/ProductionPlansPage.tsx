@@ -1,5 +1,4 @@
 import {
-  CalendarOutlined,
   DeleteOutlined,
   EditOutlined,
   LinkOutlined,
@@ -39,6 +38,9 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: 'default',
   not_started: 'default'
 };
+
+const GANTT_DAY_WIDTH = 34;
+const GANTT_ROW_HEIGHT = 38;
 
 type ScheduleFormValues = {
   name: string;
@@ -167,7 +169,8 @@ export function ProductionPlansPage() {
     () => buildGanttColumns(board?.dates ?? [], openEditSchedule, (item) => deleteMutation.mutate(item.id)),
     [board?.dates, deleteMutation]
   );
-  const scrollX = 64 + 260 + 250 + (board?.dates.length ?? 0) * 36 + 390;
+  const timelineWidth = Math.max((board?.dates.length ?? 0) * GANTT_DAY_WIDTH, 320);
+  const scrollX = 64 + 260 + 250 + timelineWidth + 390;
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -301,7 +304,18 @@ export function ProductionPlansPage() {
           </Card>
         </Col>
         <Col xs={24} xl={17}>
-          <Card className="production-plan-card" title="排期甘特图">
+          <Card
+            className="production-plan-card"
+            title="排期甘特图"
+            extra={
+              <Space size={4} wrap className="gantt-legend">
+                <Tag color="green">装焊</Tag>
+                <Tag color="cyan">下料</Tag>
+                <Tag color="purple">喷涂</Tag>
+                <Tag color="blue">发货</Tag>
+              </Space>
+            }
+          >
             <Table<ProductionPlanItem>
               rowKey="id"
               loading={boardQuery.isLoading}
@@ -312,7 +326,7 @@ export function ProductionPlansPage() {
               bordered
               sticky
               tableLayout="fixed"
-              scroll={{ x: scrollX, y: 'calc(100vh - 328px)' }}
+          scroll={{ x: scrollX, y: 'calc(100vh - 328px)' }}
               rowClassName={(row) => `production-plan-row status-${row.effective_status}`}
             />
           </Card>
@@ -360,15 +374,7 @@ function buildGanttColumns(
   onEdit: (item: ProductionPlanItem) => void,
   onDelete: (item: ProductionPlanItem) => void
 ): ColumnsType<ProductionPlanItem> {
-  const dateColumns: ColumnsType<ProductionPlanItem> = dates.map((date) => ({
-    title: <DateHeader date={date} />,
-    key: date,
-    width: 36,
-    align: 'center',
-    className: 'production-plan-date-cell',
-    onHeaderCell: () => ({ className: 'production-plan-date-header' }),
-    render: (_value, row) => <GanttDateCell date={date} row={row} />
-  }));
+  const timelineWidth = Math.max(dates.length * GANTT_DAY_WIDTH, 320);
 
   return [
     {
@@ -416,7 +422,14 @@ function buildGanttColumns(
         </Space>
       )
     },
-    ...dateColumns,
+    {
+      title: <TimelineHeader dates={dates} />,
+      key: 'timeline',
+      width: timelineWidth,
+      className: 'gantt-timeline-cell',
+      onHeaderCell: () => ({ className: 'gantt-timeline-header' }),
+      render: (_value, row) => <GanttTimeline dates={dates} row={row} />
+    },
     {
       title: '工期',
       dataIndex: 'duration_days',
@@ -470,34 +483,77 @@ function buildGanttColumns(
   ];
 }
 
-function DateHeader({ date }: { date: string }) {
-  const [, month, day] = date.split('-');
+function TimelineHeader({ dates }: { dates: string[] }) {
+  if (dates.length === 0) return <span>时间轴</span>;
+  const monthLabel = dayjs(dates[0]).format('YYYY年M月');
   return (
-    <Space direction="vertical" size={0} className="production-plan-date-title">
-      <span>{Number(day)}</span>
-      <small>{Number(month)}月</small>
-    </Space>
+    <div className="gantt-header" style={{ width: dates.length * GANTT_DAY_WIDTH }}>
+      <div className="gantt-month-label">{monthLabel}</div>
+      <div className="gantt-day-grid" style={{ gridTemplateColumns: `repeat(${dates.length}, ${GANTT_DAY_WIDTH}px)` }}>
+        {dates.map((date) => {
+          const day = dayjs(date);
+          const isWeekend = [0, 6].includes(day.day());
+          return (
+            <div key={date} className={isWeekend ? 'gantt-day-header is-weekend' : 'gantt-day-header'}>
+              <span>{day.date()}</span>
+              <small>{day.format('dd')}</small>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
-function GanttDateCell({ date, row }: { date: string; row: ProductionPlanItem }) {
-  const planned = date >= row.planned_start_date && date <= row.planned_end_date;
-  const start = date === row.planned_start_date;
-  const end = date === row.planned_end_date;
-  const title = planned
-    ? `${row.name}：${row.planned_start_date} 至 ${row.planned_end_date}`
-    : `${date} 无排产`;
+function GanttTimeline({ dates, row }: { dates: string[]; row: ProductionPlanItem }) {
+  const width = Math.max(dates.length * GANTT_DAY_WIDTH, 320);
+  if (dates.length === 0) {
+    return <div className="gantt-row-track empty">暂无日期</div>;
+  }
+  const firstDate = dates[0];
+  const lastDate = dates[dates.length - 1];
+  if (row.planned_end_date < firstDate || row.planned_start_date > lastDate) {
+    return (
+      <Tooltip title={`${row.name}：${row.planned_start_date} 至 ${row.planned_end_date}`}>
+        <div className="gantt-row-track empty" style={{ width, height: GANTT_ROW_HEIGHT }}>
+          超出当前月份
+        </div>
+      </Tooltip>
+    );
+  }
+  const startDate = row.planned_start_date < firstDate ? firstDate : row.planned_start_date;
+  const endDate = row.planned_end_date > lastDate ? lastDate : row.planned_end_date;
+  const startIndex = Math.max(0, dates.findIndex((date) => date >= startDate));
+  const endIndex = Math.max(startIndex, dates.findIndex((date) => date >= endDate));
+  const duration = Math.max(endIndex - startIndex + 1, 1);
+  const left = startIndex * GANTT_DAY_WIDTH + 3;
+  const barWidth = duration * GANTT_DAY_WIDTH - 6;
+  const progress = Math.max(0, Math.min(100, Math.round(Number(row.progress ?? 0))));
+  const title = `${row.name}：${row.planned_start_date} 至 ${row.planned_end_date}，完成 ${progress}%`;
   return (
     <Tooltip title={title}>
-      <div
-        className={[
-          'production-plan-day',
-          planned ? 'is-planned' : '',
-          start ? 'is-start' : '',
-          end ? 'is-end' : ''
-        ].filter(Boolean).join(' ')}
-      >
-        {planned && start ? <CalendarOutlined /> : null}
+      <div className="gantt-row-track" style={{ width, height: GANTT_ROW_HEIGHT }}>
+        <div className="gantt-grid-lines">
+          {dates.map((date) => (
+            <span key={date} className={[0, 6].includes(dayjs(date).day()) ? 'is-weekend' : ''} />
+          ))}
+        </div>
+        <div
+          className={[
+            'gantt-bar',
+            `task-${row.task_type ?? 'default'}`,
+            `status-${row.effective_status}`
+          ].join(' ')}
+          style={{
+            left,
+            width: Math.max(barWidth, 24),
+            ['--bar-progress' as string]: `${progress}%`
+          }}
+        >
+          <span className="gantt-bar-fill" />
+          <span className="gantt-bar-label">{row.name}</span>
+          <span className="gantt-bar-progress">{progress}%</span>
+        </div>
       </div>
     </Tooltip>
   );
