@@ -1210,13 +1210,51 @@ type ProductionPlanBacklogRow = {
   open_exception_count: number;
 };
 
+function getSchedulableDepartments() {
+  return db
+    .prepare(
+      `SELECT id, name
+       FROM (
+         SELECT d.id, d.name, MIN(tt.sort_order) as first_sort_order
+         FROM department d
+         JOIN task_template tt ON tt.default_owner_department_id = d.id
+         WHERE d.id != 'dept-business'
+         GROUP BY d.id, d.name
+       )
+       ORDER BY first_sort_order, name`
+    )
+    .all() as Array<{ id: string; name: string }>;
+}
+
 export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPlanFilters) {
   const monthOptions = db
     .prepare('SELECT DISTINCT plan_month FROM production_plan ORDER BY plan_month DESC')
     .all() as Array<{ plan_month: string }>;
-  const departments = db.prepare('SELECT id, name FROM department ORDER BY name').all();
+  const departments = getSchedulableDepartments();
+  const departmentIds = departments.map((department) => department.id);
   const teams = db.prepare('SELECT id, name, leader_id FROM team ORDER BY name').all();
   const projects = db.prepare('SELECT id, name FROM project_case ORDER BY source_seq, id').all();
+  if (departmentIds.length === 0) {
+    const months = monthOptions.map((item) => item.plan_month);
+    return {
+      plan: null,
+      dates: [],
+      items: [],
+      backlog_items: [],
+      summary: { item_count: 0, linked_project_count: 0, scheduled_days: 0, completed_count: 0, backlog_count: 0 },
+      filters: {
+        departments,
+        teams,
+        projects,
+        months
+      }
+    };
+  }
+  if (filters.department_id && !departmentIds.includes(filters.department_id)) {
+    const err = new Error('该部门不支持生产计划');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
   if ((filters.start_date && !filters.end_date) || (!filters.start_date && filters.end_date)) {
     const err = new Error('请选择完整的开始和结束日期');
     err.name = 'VALIDATION_ERROR';
@@ -1228,7 +1266,8 @@ export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPla
   const hasDateRange = Boolean(filters.start_date && filters.end_date);
 
   const planWhere: string[] = [];
-  const planParams: unknown[] = [];
+  const planParams: unknown[] = [...departmentIds];
+  planWhere.push(`pp.department_id IN (${departmentIds.map(() => '?').join(', ')})`);
   if (filters.department_id) {
     planWhere.push('pp.department_id = ?');
     planParams.push(filters.department_id);
