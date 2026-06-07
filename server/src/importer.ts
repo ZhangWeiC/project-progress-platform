@@ -296,11 +296,7 @@ function parseItem(row: ExcelJS.Row, rowNumber: number, sheetName: string, issue
 
   const deliveryDate = normalizeDate(row.getCell(30).value);
   const deliveryStatus = cellText(row.getCell(31).value).trim();
-  const deliveryTask = task('tt-delivery', 'delivery', '发货', 'dept-delivery', '', undefined, [
-    manualSubtask('st-delivery-plan', '发货计划', 'AD', deliveryDate ? 100 : 0, deliveryDate),
-    manualSubtask('st-delivery-execute', '发货执行', 'AE', deliveryExecutionProgress(deliveryStatus), deliveryStatus)
-  ]);
-  const tasks = [materialTask, cuttingTask, productionTask, paintingTask, inspectionTask, deliveryTask];
+  const tasks = [materialTask, cuttingTask, productionTask, paintingTask, inspectionTask];
   const progress = average(tasks.map(taskProgress));
 
   return {
@@ -324,10 +320,6 @@ function parseItem(row: ExcelJS.Row, rowNumber: number, sheetName: string, issue
       progress: parsed.value,
       raw: parsed.raw
     };
-  }
-
-  function manualSubtask(templateId: string, name: string, sourceColumn: string, progress: number, raw: string): ParsedSubtask {
-    return { templateId, name, sourceColumn, progress, raw };
   }
 }
 
@@ -710,13 +702,6 @@ function assigneeRole(taskType: string) {
   if (taskType === 'material') return 'material_owner';
   if (taskType === 'inspection') return 'quality_owner';
   return 'team_leader';
-}
-
-function deliveryExecutionProgress(deliveryStatus: string) {
-  if (!deliveryStatus) return 0;
-  if (deliveryStatus.includes('部分') || /已发\s*\d/.test(deliveryStatus)) return 50;
-  if (deliveryStatus.includes('已出货') || deliveryStatus.includes('已完成') || deliveryStatus.includes('已发')) return 100;
-  return 0;
 }
 
 function subtaskSortOrder(templateId: string) {

@@ -247,7 +247,7 @@ function buildColumns(columns: MatrixColumn[], openTask: (taskId: string) => voi
       dataIndex: column.key,
       key: column.key,
       fixed: 'right' as const,
-      width: column.key === 'delivery_status' ? 126 : 70,
+      width: 70,
       className: 'matrix-fixed-right',
       render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row)
     }));
@@ -268,19 +268,29 @@ function buildColumns(columns: MatrixColumn[], openTask: (taskId: string) => voi
       children: children.map((child) => ({
         title: child.title,
         key: child.key,
-        width: 82,
-        align: 'center' as const,
+        width: matrixColumnWidth(child),
+        align: isPlainMatrixColumn(child) ? 'left' as const : 'center' as const,
         className: `matrix-stage-cell stage-${stageColor}`,
         onHeaderCell: () => ({ className: `matrix-substage-header stage-${stageColor}` }),
         onCell: () => ({ className: `matrix-stage-cell stage-${stageColor}` }),
-        render: (_value: unknown, row: MatrixRow) => (
-          <ProgressCell cell={row.cells[child.key]} onOpenTask={openTask} />
-        )
+        render: (_value: unknown, row: MatrixRow) => isPlainMatrixColumn(child)
+          ? renderPinnedCell(child.key, row)
+          : <ProgressCell cell={row.cells[child.key]} onOpenTask={openTask} />
       }))
     };
   });
 
   return [...leftColumns, ...groupedColumns, ...rightColumns];
+}
+
+function isPlainMatrixColumn(column: MatrixColumn) {
+  return column.key === 'delivery_date' || column.key === 'delivery_status';
+}
+
+function matrixColumnWidth(column: MatrixColumn) {
+  if (column.key === 'delivery_date') return 112;
+  if (column.key === 'delivery_status') return 126;
+  return 82;
 }
 
 function renderPinnedCell(key: string, row: MatrixRow) {

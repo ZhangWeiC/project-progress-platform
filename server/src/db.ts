@@ -407,8 +407,7 @@ function seedDatabase() {
     { id: 'tt-cutting', case_template_id: 'tpl-steel-v1', name: '下料', task_type: 'cutting', sort_order: 30, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 },
     { id: 'tt-production', case_template_id: 'tpl-steel-v1', name: '装焊', task_type: 'production', sort_order: 40, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 },
     { id: 'tt-painting', case_template_id: 'tpl-steel-v1', name: '喷涂', task_type: 'painting', sort_order: 50, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 },
-    { id: 'tt-inspection', case_template_id: 'tpl-steel-v1', name: '验收', task_type: 'inspection', sort_order: 60, generation_scope: 'item', default_owner_department_id: 'dept-quality', progress_rule: 'average', required: 1, skippable: 0 },
-    { id: 'tt-delivery', case_template_id: 'tpl-steel-v1', name: '发货', task_type: 'delivery', sort_order: 70, generation_scope: 'item', default_owner_department_id: 'dept-delivery', progress_rule: 'average', required: 1, skippable: 0 }
+    { id: 'tt-inspection', case_template_id: 'tpl-steel-v1', name: '验收', task_type: 'inspection', sort_order: 60, generation_scope: 'item', default_owner_department_id: 'dept-quality', progress_rule: 'average', required: 1, skippable: 0 }
   ]);
 
   insertMany('subtask_template', [
@@ -429,9 +428,7 @@ function seedDatabase() {
     { id: 'st-painting', task_template_id: 'tt-painting', name: '喷涂作业', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
     { id: 'st-self-check', task_template_id: 'tt-inspection', name: '自检', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
     { id: 'st-mutual-check', task_template_id: 'tt-inspection', name: '互检', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-special-check', task_template_id: 'tt-inspection', name: '专检', sort_order: 30, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-delivery-plan', task_template_id: 'tt-delivery', name: '发货计划', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-delivery-execute', task_template_id: 'tt-delivery', name: '发货执行', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0 }
+    { id: 'st-special-check', task_template_id: 'tt-inspection', name: '专检', sort_order: 30, progress_rule: 'manual', required: 1, skippable: 0 }
   ]);
 
   insertMany('project_case', [
@@ -595,7 +592,6 @@ function seedTasksForCases() {
 
 function taskProgressFor(itemId: string, taskType: string) {
   if (taskType === 'material' || taskType === 'cutting' || taskType === 'inspection') return 100;
-  if (taskType === 'delivery') return itemId.startsWith('ITEM-001') ? 100 : 30;
   if (itemId === 'ITEM-002-05' && taskType === 'production') return 95;
   if (itemId === 'ITEM-002-06' && taskType === 'production') return 80;
   if (itemId === 'ITEM-002-09' && taskType === 'production') return 90;
@@ -606,7 +602,6 @@ function subtaskProgressFor(itemId: string, taskType: string, name: string) {
   if (itemId === 'ITEM-002-05' && taskType === 'production' && name === '预拼装、校正') return 75;
   if (itemId === 'ITEM-002-06' && taskType === 'production' && name === '预拼装、校正') return 0;
   if (itemId === 'ITEM-002-09' && taskType === 'production' && name === '预拼装、校正') return 80;
-  if (taskType === 'delivery') return itemId.startsWith('ITEM-001') ? 100 : 30;
   return taskProgressFor(itemId, taskType);
 }
 
@@ -693,12 +688,6 @@ function seedProductionPlans() {
         .prepare("SELECT id FROM case_task WHERE project_case_id = ? AND case_item_id = ? AND task_type = 'production' LIMIT 1")
         .get(projectCaseId, caseItemId) as { id: string } | undefined
     : undefined;
-  const deliveryTask = projectCaseId && caseItemId
-    ? db
-        .prepare("SELECT id FROM case_task WHERE project_case_id = ? AND case_item_id = ? AND task_type = 'delivery' LIMIT 1")
-        .get(projectCaseId, caseItemId) as { id: string } | undefined
-    : undefined;
-
   insertMany('production_plan', [
     {
       id: 'PP-202604-production',
@@ -728,8 +717,7 @@ function seedProductionPlans() {
     ['内侧模4装焊完毕', '2026-04-10', '2026-04-15', 'production'],
     ['内模顶、底模块拼装焊接完毕', '2026-04-10', '2026-04-15', 'production'],
     ['内模所有构件总拼装完毕', '2026-04-10', '2026-04-15', 'production'],
-    ['内外模总装后顶部预埋装焊完毕', '2026-04-10', '2026-04-15', 'production'],
-    ['整体验收出货', '2026-04-10', '2026-04-20', 'delivery']
+    ['内外模总装后顶部预埋装焊完毕', '2026-04-10', '2026-04-15', 'production']
   ] as Array<[string, string, string, string]>;
 
   insertMany('production_plan_item', taskRows.map((row, index) => ({
@@ -737,7 +725,7 @@ function seedProductionPlans() {
     production_plan_id: 'PP-202604-production',
     project_case_id: projectCaseId,
     case_item_id: caseItemId,
-    case_task_id: row[3] === 'delivery' ? deliveryTask?.id ?? null : productionTask?.id ?? null,
+    case_task_id: productionTask?.id ?? null,
     task_type: row[3],
     name: row[0],
     sort_order: index + 1,
@@ -756,9 +744,7 @@ function migrateWorkflowModel() {
     { id: 'tt-painting', case_template_id: 'tpl-steel-v1', name: '喷涂', task_type: 'painting', sort_order: 50, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 }
   ]);
   insertMany('subtask_template', [
-    { id: 'st-drawing-review', task_template_id: 'tt-design', name: '图纸定审', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-delivery-plan', task_template_id: 'tt-delivery', name: '发货计划', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-delivery-execute', task_template_id: 'tt-delivery', name: '发货执行', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0 }
+    { id: 'st-drawing-review', task_template_id: 'tt-design', name: '图纸定审', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 }
   ]);
 
   const tx = db.transaction(() => {
@@ -769,12 +755,11 @@ function migrateWorkflowModel() {
     db.prepare("UPDATE task_template SET name = '装焊', sort_order = 40 WHERE id = 'tt-production'").run();
     db.prepare("UPDATE task_template SET name = '喷涂', task_type = 'painting', sort_order = 50, generation_scope = 'item', progress_rule = 'average' WHERE id = 'tt-painting'").run();
     db.prepare("UPDATE task_template SET sort_order = 60 WHERE id = 'tt-inspection'").run();
-    db.prepare("UPDATE task_template SET sort_order = 70, progress_rule = 'average' WHERE id = 'tt-delivery'").run();
     db.prepare("UPDATE subtask_template SET task_template_id = 'tt-painting', name = '喷涂作业', sort_order = 10, required = 1, skippable = 0 WHERE id = 'st-painting'").run();
 
     migrateDesignTasks();
     migratePaintingTasks();
-    migrateDeliveryTasks();
+    purgeDeliveryStageData();
     purgeDesignConfirmData();
     recalculateImportedProgress();
 
@@ -939,59 +924,51 @@ function migratePaintingTasks() {
   }
 }
 
-function migrateDeliveryTasks() {
-  const items = db.prepare('SELECT id, project_case_id, delivery_date, delivery_status FROM case_item').all() as Array<{
-    id: string;
-    project_case_id: string;
-    delivery_date: string | null;
-    delivery_status: string | null;
-  }>;
-  for (const item of items) {
-    let deliveryTask = db
-      .prepare("SELECT id FROM case_task WHERE case_item_id = ? AND task_type = 'delivery' LIMIT 1")
-      .get(item.id) as { id: string } | undefined;
-    if (!deliveryTask) {
-      const taskId = `TASK-${item.id}-delivery`;
-      db.prepare(
-        `INSERT INTO case_task
-         (id, project_case_id, case_item_id, task_template_id, name, task_type, owner_department_id, assignee_id, team_id, status, progress, is_delayed, is_applicable, include_in_progress, source_row, source_column, raw_import_value, remark)
-         VALUES (?, ?, ?, 'tt-delivery', '发货', 'delivery', 'dept-delivery', null, null, 'not_started', 0, 0, 1, 1, null, 'AE', '', '')`
-      ).run(taskId, item.project_case_id, item.id);
-      deliveryTask = { id: taskId };
-    }
+function purgeDeliveryStageData() {
+  const deliveryTaskPredicate = "task_type = 'delivery' OR task_template_id = 'tt-delivery'";
+  const deliverySubtaskPredicate = `
+    case_task_id IN (SELECT id FROM case_task WHERE ${deliveryTaskPredicate})
+    OR subtask_template_id IN ('st-delivery-plan', 'st-delivery-execute')
+  `;
 
-    const planProgress = item.delivery_date ? 100 : 0;
-    const executeProgress = migratedDeliveryProgress(item.delivery_status ?? '');
-    const existingPlan = db
-      .prepare("SELECT progress FROM case_subtask WHERE case_task_id = ? AND subtask_template_id = 'st-delivery-plan'")
-      .get(deliveryTask.id) as { progress: number } | undefined;
-    const existingExecute = db
-      .prepare("SELECT progress FROM case_subtask WHERE case_task_id = ? AND subtask_template_id = 'st-delivery-execute'")
-      .get(deliveryTask.id) as { progress: number } | undefined;
-    const effectivePlanProgress = existingPlan?.progress ?? planProgress;
-    const effectiveExecuteProgress = existingExecute?.progress ?? executeProgress;
-    upsertMigratedSubtask({
-      id: `SUB-${item.id}-st-delivery-plan`,
-      taskId: deliveryTask.id,
-      templateId: 'st-delivery-plan',
-      name: '发货计划',
-      sortOrder: 10,
-      progress: effectivePlanProgress,
-      sourceColumn: 'AD',
-      rawValue: item.delivery_date ?? ''
-    });
-    upsertMigratedSubtask({
-      id: `SUB-${item.id}-st-delivery-execute`,
-      taskId: deliveryTask.id,
-      templateId: 'st-delivery-execute',
-      name: '发货执行',
-      sortOrder: 20,
-      progress: effectiveExecuteProgress,
-      sourceColumn: 'AE',
-      rawValue: item.delivery_status ?? ''
-    });
-    updateTaskProgress(deliveryTask.id, averageProgress([effectivePlanProgress, effectiveExecuteProgress]));
-  }
+  db.prepare(
+    `DELETE FROM production_plan_item
+     WHERE task_type = 'delivery'
+        OR case_task_id IN (SELECT id FROM case_task WHERE ${deliveryTaskPredicate})`
+  ).run();
+  db.prepare(
+    `DELETE FROM exception_comment
+     WHERE exception_id IN (
+       SELECT id FROM exception_record
+       WHERE case_task_id IN (SELECT id FROM case_task WHERE ${deliveryTaskPredicate})
+          OR case_subtask_id IN (SELECT id FROM case_subtask WHERE ${deliverySubtaskPredicate})
+     )`
+  ).run();
+  db.prepare(
+    `DELETE FROM exception_record
+     WHERE case_task_id IN (SELECT id FROM case_task WHERE ${deliveryTaskPredicate})
+        OR case_subtask_id IN (SELECT id FROM case_subtask WHERE ${deliverySubtaskPredicate})`
+  ).run();
+  db.prepare(
+    `DELETE FROM work_log_entry
+     WHERE case_task_id IN (SELECT id FROM case_task WHERE ${deliveryTaskPredicate})
+        OR case_subtask_id IN (SELECT id FROM case_subtask WHERE ${deliverySubtaskPredicate})`
+  ).run();
+  db.prepare(
+    `DELETE FROM progress_log
+     WHERE (target_type = 'task' AND target_id IN (SELECT id FROM case_task WHERE ${deliveryTaskPredicate}))
+        OR (target_type = 'subtask' AND target_id IN (SELECT id FROM case_subtask WHERE ${deliverySubtaskPredicate}))`
+  ).run();
+  db.prepare(
+    `UPDATE case_subtask
+     SET parent_subtask_id = NULL
+     WHERE parent_subtask_id IN (SELECT id FROM case_subtask WHERE ${deliverySubtaskPredicate})`
+  ).run();
+  db.prepare(`DELETE FROM case_subtask WHERE ${deliverySubtaskPredicate}`).run();
+  db.prepare(`DELETE FROM case_task WHERE ${deliveryTaskPredicate}`).run();
+  db.prepare("DELETE FROM project_case_member WHERE role_in_case LIKE 'delivery_%'").run();
+  db.prepare("DELETE FROM subtask_template WHERE id IN ('st-delivery-plan', 'st-delivery-execute')").run();
+  db.prepare("DELETE FROM task_template WHERE id = 'tt-delivery'").run();
 }
 
 function upsertMigratedSubtask(input: {
@@ -1075,13 +1052,6 @@ function averageProgress(values: number[]) {
 
 function progressStatus(progress: number) {
   return progress >= 100 ? 'completed' : progress > 0 ? 'in_progress' : 'not_started';
-}
-
-function migratedDeliveryProgress(status: string) {
-  if (!status) return 0;
-  if (status.includes('部分') || /已发\s*\d/.test(status)) return 50;
-  if (status.includes('已出货') || status.includes('已完成') || status.includes('已发')) return 100;
-  return 0;
 }
 
 export function nowIso() {
