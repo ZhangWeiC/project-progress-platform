@@ -51,6 +51,26 @@ export async function loginRequest(loginName: string, password: string) {
   return session;
 }
 
+export async function getFeishuAuthorizeUrl(redirect: string) {
+  const response = await fetch(`/api/auth/feishu/authorize-url?redirect=${encodeURIComponent(redirect)}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.message ?? '无法发起飞书登录');
+  return payload as { authorization_url: string };
+}
+
+export async function feishuCallbackRequest(code: string, state: string) {
+  const response = await fetch('/api/auth/feishu/callback', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code, state })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.message ?? '飞书登录失败');
+  const session = payload as AuthSession & { redirect?: string };
+  setAuthSession(session);
+  return session;
+}
+
 export async function logoutRequest() {
   const session = getAuthSession();
   if (session) {

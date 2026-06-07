@@ -22,6 +22,7 @@ import {
 } from './services.js';
 import { confirmExcelImport, createExcelImport, getImportPreview } from './importer.js';
 import { login, logout } from './auth.js';
+import { buildFeishuAuthorizeUrl, getFeishuContactsByDepartment, getFeishuStatus, loginWithFeishuCode, syncFeishuContacts } from './feishu.js';
 
 initializeDatabase();
 
@@ -47,7 +48,7 @@ app.setErrorHandler((error, _request, reply) => {
   });
 });
 
-const publicApiPaths = new Set(['/api/health', '/api/auth/login', '/api/auth/logout']);
+const publicApiPaths = new Set(['/api/health', '/api/auth/login', '/api/auth/logout', '/api/auth/feishu/authorize-url', '/api/auth/feishu/callback']);
 
 app.addHook('preHandler', async (request) => {
   const path = request.url.split('?')[0];
@@ -68,6 +69,21 @@ app.post('/api/auth/login', async (request) => {
 
 app.post('/api/auth/logout', async (request) => {
   return logout(request.headers.authorization);
+});
+
+app.get('/api/auth/feishu/authorize-url', async (request) => {
+  const query = z.object({
+    redirect: z.string().optional()
+  }).parse(request.query);
+  return buildFeishuAuthorizeUrl(query.redirect ?? '/dashboard');
+});
+
+app.post('/api/auth/feishu/callback', async (request) => {
+  const body = z.object({
+    code: z.string().min(1),
+    state: z.string().min(1)
+  }).parse(request.body);
+  return loginWithFeishuCode(body.code, body.state);
 });
 
 app.get('/api/auth/me', async (request) => {
@@ -518,6 +534,31 @@ app.get('/api/lookups', async () => {
     departments: db.prepare('SELECT * FROM department ORDER BY name').all(),
     teams: db.prepare('SELECT * FROM team ORDER BY name').all()
   };
+});
+
+app.get('/api/admin/feishu/status', async (request) => {
+  const user = getCurrentUser(request.headers);
+  if (user.role !== 'admin') {
+    const err = new Error('仅管理员可查看飞书同步状态');
+    err.name = 'PERMISSION_DENIED';
+    throw err;
+  }
+  return getFeishuStatus();
+});
+
+app.post('/api/admin/feishu/sync-contacts', async (request) => {
+  const user = getCurrentUser(request.headers);
+  return syncFeishuContacts(user);
+});
+
+app.get('/api/admin/feishu/contacts', async (request) => {
+  const user = getCurrentUser(request.headers);
+  if (user.role !== 'admin') {
+    const err = new Error('仅管理员可查看飞书通讯录');
+    err.name = 'PERMISSION_DENIED';
+    throw err;
+  }
+  return getFeishuContactsByDepartment();
 });
 
 app.get('/api/views', async () => {

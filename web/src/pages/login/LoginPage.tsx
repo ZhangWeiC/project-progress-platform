@@ -1,8 +1,8 @@
 import { LockOutlined, LoginOutlined, UserOutlined } from '@ant-design/icons';
-import { Button, Form, Input, Typography, message } from 'antd';
+import { Button, Divider, Form, Input, Typography, message } from 'antd';
 import { useMutation } from '@tanstack/react-query';
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
-import { getAuthSession, loginRequest } from '../../services/auth';
+import { getAuthSession, getFeishuAuthorizeUrl, loginRequest } from '../../services/auth';
 
 type LoginValues = {
   loginName: string;
@@ -18,6 +18,13 @@ export function LoginPage() {
       message.success('登录成功');
       const redirect = searchParams.get('redirect');
       navigate(redirect?.startsWith('/') ? redirect : '/dashboard', { replace: true });
+    },
+    onError: (error) => message.error(error.message)
+  });
+  const feishuLogin = useMutation({
+    mutationFn: () => getFeishuAuthorizeUrl(searchParams.get('redirect') ?? '/dashboard'),
+    onSuccess: (payload) => {
+      window.location.assign(payload.authorization_url);
     },
     onError: (error) => message.error(error.message)
   });
@@ -47,6 +54,11 @@ export function LoginPage() {
             登录
           </Button>
         </Form>
+
+        <Divider plain>或</Divider>
+        <Button block icon={<LoginOutlined />} loading={feishuLogin.isPending} onClick={() => feishuLogin.mutate()}>
+          飞书登录
+        </Button>
       </section>
     </main>
   );

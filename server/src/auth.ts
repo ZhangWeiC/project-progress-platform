@@ -30,24 +30,12 @@ export function login(loginName: string, password: string) {
     throw err;
   }
 
-  db.prepare('DELETE FROM auth_session WHERE expires_at <= ?').run(nowIso());
-  const token = randomBytes(32).toString('base64url');
-  const expiresAt = new Date(Date.now() + SESSION_DURATION_MS).toISOString();
-  db.prepare(
-    `INSERT INTO auth_session (token_hash, employee_id, created_at, expires_at)
-     VALUES (?, ?, ?, ?)`
-  ).run(hashToken(token), credential.employee_id, nowIso(), expiresAt);
-
-  return {
-    token,
-    expires_at: expiresAt,
-    user: {
-      id: credential.employee_id,
-      name: credential.name,
-      role: credential.role,
-      permission_level: credential.permission_level
-    }
-  };
+  return createSession({
+    id: credential.employee_id,
+    name: credential.name,
+    role: credential.role,
+    permission_level: credential.permission_level
+  });
 }
 
 export function logout(authorization: unknown) {
@@ -69,7 +57,7 @@ export function authenticate(authorization: unknown): CurrentUser {
       `SELECT e.id, e.name, e.role, e.permission_level
        FROM auth_session s
        JOIN employee e ON e.id = s.employee_id
-       WHERE s.token_hash = ? AND s.expires_at > ?`
+       WHERE s.token_hash = ? AND s.expires_at > ? AND COALESCE(e.is_active, 1) = 1`
     )
     .get(hashToken(token), nowIso()) as CurrentUser | undefined;
   if (!user) {
@@ -78,6 +66,22 @@ export function authenticate(authorization: unknown): CurrentUser {
     throw err;
   }
   return user;
+}
+
+export function createSession(user: CurrentUser) {
+  db.prepare('DELETE FROM auth_session WHERE expires_at <= ?').run(nowIso());
+  const token = randomBytes(32).toString('base64url');
+  const expiresAt = new Date(Date.now() + SESSION_DURATION_MS).toISOString();
+  db.prepare(
+    `INSERT INTO auth_session (token_hash, employee_id, created_at, expires_at)
+     VALUES (?, ?, ?, ?)`
+  ).run(hashToken(token), user.id, nowIso(), expiresAt);
+
+  return {
+    token,
+    expires_at: expiresAt,
+    user
+  };
 }
 
 function verifyPassword(password: string, salt: string, expectedHash: string) {

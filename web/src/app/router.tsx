@@ -15,10 +15,12 @@ import { MobileWorkLogPage } from '../pages/mobile/MobileWorkLogPage';
 import { MobileExceptionsPage } from '../pages/mobile/MobileExceptionsPage';
 import { MobileCaseSummaryPage } from '../pages/mobile/MobileCaseSummaryPage';
 import { LoginPage } from '../pages/login/LoginPage';
+import { FeishuCallbackPage } from '../pages/auth/FeishuCallbackPage';
 import { RequireAuth } from '../components/auth/RequireAuth';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
+  { path: '/auth/feishu/callback', element: <FeishuCallbackPage /> },
   {
     path: '/',
     element: <RequireAuth><AppShell /></RequireAuth>,
