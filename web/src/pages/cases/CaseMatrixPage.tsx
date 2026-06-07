@@ -292,7 +292,14 @@ function renderPinnedCell(key: string, row: MatrixRow, management: MatrixManagem
           {row.row_type === 'project' && management.canManage && (
             <Space size={2} className="matrix-row-actions">
               <Tooltip title="编辑项目">
-                <Button size="small" type="text" icon={<EditOutlined />} onClick={() => management.onEditProject(row)} />
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<EditOutlined />}
+                  aria-label="编辑项目"
+                  title="编辑项目"
+                  onClick={() => management.onEditProject(row)}
+                />
               </Tooltip>
               <Popconfirm
                 title="删除项目"
@@ -302,9 +309,14 @@ function renderPinnedCell(key: string, row: MatrixRow, management: MatrixManagem
                 okButtonProps={{ danger: true, loading: management.deleteLoading }}
                 onConfirm={() => management.onDeleteProject(row)}
               >
-                <Tooltip title="删除项目">
-                  <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-                </Tooltip>
+                <Button
+                  size="small"
+                  type="text"
+                  danger
+                  icon={<DeleteOutlined />}
+                  aria-label="删除项目"
+                  title="删除项目"
+                />
               </Popconfirm>
             </Space>
           )}

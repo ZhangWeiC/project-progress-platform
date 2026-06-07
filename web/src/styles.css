@@ -175,7 +175,7 @@ body {
 
 .matrix-row-actions {
   flex: none;
-  opacity: 0;
+  opacity: 0.72;
   transition: opacity 0.12s ease;
 }
 
@@ -184,8 +184,8 @@ body {
 }
 
 .matrix-row-actions .ant-btn {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
 }
 
