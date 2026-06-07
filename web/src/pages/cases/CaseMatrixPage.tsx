@@ -51,6 +51,7 @@ export function CaseMatrixPage() {
   const activeExpandedRowKeys = searchKeyword.trim()
     ? filteredRows.map((row) => row.row_id ?? row.case_item_id)
     : expandedRowKeys;
+  const hasManualExpandedRows = expandedRowKeys.length > 0;
 
   const refreshProjectQueries = async () => {
     await Promise.all([
@@ -150,11 +151,11 @@ export function CaseMatrixPage() {
               onChange={(event) => setSearchKeyword(event.target.value)}
               style={{ width: 280 }}
             />
-            <Button icon={<ExpandAltOutlined />} onClick={() => setExpandedRowKeys(projectRowKeys)}>
-              展开
-            </Button>
-            <Button icon={<CompressOutlined />} onClick={() => setExpandedRowKeys([])}>
-              折叠
+            <Button
+              icon={hasManualExpandedRows ? <CompressOutlined /> : <ExpandAltOutlined />}
+              onClick={() => setExpandedRowKeys(hasManualExpandedRows ? [] : projectRowKeys)}
+            >
+              {hasManualExpandedRows ? '折叠' : '展开'}
             </Button>
             <Button icon={<ReloadOutlined />} onClick={() => matrixQuery.refetch()}>
               刷新
