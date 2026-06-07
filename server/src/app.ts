@@ -11,6 +11,7 @@ import {
   getAllMatrix,
   getCurrentUser,
   getMatrix,
+  getProjectCaseManageProfile,
   getTaskDetails,
   updateProgress,
   updateProjectCase
@@ -89,14 +90,26 @@ app.get('/api/cases', async (request) => {
     `SELECT pc.*, b.name as business_owner_name, d.name as design_owner_name,
             (SELECT COUNT(*) FROM exception_record ex WHERE ex.project_case_id = pc.id AND ex.status NOT IN ('resolved', 'closed', 'cancelled')) as open_exception_count
      FROM project_case pc
-     JOIN project_case_member m ON m.project_case_id = pc.id
      LEFT JOIN employee b ON b.id = pc.business_owner_id
      LEFT JOIN employee d ON d.id = pc.design_owner_id
-     WHERE m.user_id = ?
+     WHERE EXISTS (
+       SELECT 1 FROM project_case_member m
+       WHERE m.project_case_id = pc.id
+         AND m.user_id = ?
+     )
      ORDER BY pc.source_seq`
   ).all(user.id);
 });
 
+const projectCaseItemBody = z.object({
+  id: z.string().nullable().optional(),
+  name: z.string().trim().min(1)
+});
+const projectCaseStageOwnerBody = z.object({
+  task_type: z.string().trim().min(1),
+  assignee_id: z.string().nullable().optional(),
+  team_id: z.string().nullable().optional()
+});
 const projectCaseFields = {
   code: z.string().trim().nullable().optional(),
   category: z.string().trim().nullable().optional(),
@@ -105,7 +118,9 @@ const projectCaseFields = {
   design_owner_id: z.string().nullable().optional(),
   estimated_weight: z.number().nullable().optional(),
   delivery_date: z.string().trim().nullable().optional(),
-  delivery_status: z.string().trim().nullable().optional()
+  delivery_status: z.string().trim().nullable().optional(),
+  items: z.array(projectCaseItemBody).optional(),
+  stage_owners: z.array(projectCaseStageOwnerBody).optional()
 };
 const projectCaseCreateBody = z.object({
   ...projectCaseFields,
@@ -138,6 +153,12 @@ app.delete('/api/cases/:id', async (request) => {
 app.get('/api/cases/matrix', async (request) => {
   const user = getCurrentUser(request.headers);
   return getAllMatrix(user);
+});
+
+app.get('/api/cases/:id/manage-profile', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  return getProjectCaseManageProfile(id, user);
 });
 
 app.get('/api/cases/:id', async (request) => {

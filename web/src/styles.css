@@ -336,6 +336,19 @@ body {
   grid-column: 1 / -1;
 }
 
+.project-item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+
+.project-stage-owner-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 16px;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(160px, 1fr));
@@ -405,6 +418,11 @@ body {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .project-form-grid,
+  .project-stage-owner-grid {
     grid-template-columns: 1fr;
   }
 

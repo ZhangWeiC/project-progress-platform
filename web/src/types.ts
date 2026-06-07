@@ -58,6 +58,29 @@ export type ProjectCase = {
   delivery_date?: string | null;
   delivery_status?: string;
   open_exception_count?: number;
+  items?: ProjectCaseItem[];
+  stage_owners?: ProjectStageOwner[];
+};
+
+export type ProjectCaseItem = {
+  id: string;
+  name: string;
+  progress?: number;
+  status?: string;
+  source_row?: number | null;
+};
+
+export type ProjectStageOwner = {
+  task_type: string;
+  task_name: string;
+  generation_scope: 'case' | 'item';
+  sort_order: number;
+  owner_department_name?: string | null;
+  assignee_id?: string | null;
+  assignee_name?: string | null;
+  team_id?: string | null;
+  team_name?: string | null;
+  mixed?: boolean;
 };
 
 export type CaseTask = {

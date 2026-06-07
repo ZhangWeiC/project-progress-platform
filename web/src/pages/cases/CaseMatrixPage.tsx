@@ -1,25 +1,32 @@
 import { CompressOutlined, DeleteOutlined, EditOutlined, ExpandAltOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
-import { Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Divider, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import type { Key } from 'react';
 import { TaskDrawer } from '../../components/drawers/TaskDrawer';
 import { ProgressCell } from '../../components/matrix/ProgressCell';
-import { createProjectCase, deleteProjectCase, fetchAllMatrix, fetchCases, fetchLookups, updateProjectCase } from '../../services/cases';
+import { createProjectCase, deleteProjectCase, fetchAllMatrix, fetchLookups, fetchProjectCaseManageProfile, updateProjectCase } from '../../services/cases';
 import type { ProjectCasePayload } from '../../services/cases';
 import { getAuthSession } from '../../services/auth';
-import type { LookupResponse, MatrixCell, MatrixColumn, MatrixRow, ProjectCase } from '../../types';
+import type { LookupResponse, MatrixCell, MatrixColumn, MatrixRow, ProjectCase, ProjectStageOwner } from '../../types';
 
 const STAGE_COLORS = ['blue', 'cyan', 'green', 'lime', 'gold', 'orange', 'purple'];
 
+type ProjectCaseFormValues = ProjectCasePayload & {
+  stage_owner_values?: Record<string, string | null | undefined>;
+};
+
+type StageDefinition = Pick<ProjectStageOwner, 'task_type' | 'task_name' | 'generation_scope' | 'sort_order' | 'owner_department_name' | 'assignee_id' | 'team_id' | 'mixed'>;
+
 export function CaseMatrixPage() {
-  const [form] = Form.useForm<ProjectCasePayload>();
+  const [form] = Form.useForm<ProjectCaseFormValues>();
   const [openedTaskId, setOpenedTaskId] = useState<string>();
   const [expandedRowKeys, setExpandedRowKeys] = useState<Key[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectCase | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
   const queryClient = useQueryClient();
   const currentUser = getAuthSession()?.user;
   const canManageProjects = Boolean(
@@ -32,12 +39,11 @@ export function CaseMatrixPage() {
     queryKey: ['matrix', 'all'],
     queryFn: fetchAllMatrix
   });
-  const casesQuery = useQuery({ queryKey: ['cases'], queryFn: fetchCases, enabled: canManageProjects });
   const lookupsQuery = useQuery({ queryKey: ['lookups'], queryFn: fetchLookups, enabled: canManageProjects });
 
   const rows = matrixQuery.data?.rows ?? [];
   const projectRowKeys = useMemo(() => rows.map((row) => row.row_id ?? row.case_item_id), [rows]);
-  const projectById = useMemo(() => new Map((casesQuery.data ?? []).map((item) => [item.id, item])), [casesQuery.data]);
+  const stageDefinitions = useMemo(() => stageDefinitionsFromColumns(matrixQuery.data?.columns ?? []), [matrixQuery.data?.columns]);
 
   const filteredRows = useMemo(() => filterRows(rows, searchKeyword), [rows, searchKeyword]);
   const activeExpandedRowKeys = searchKeyword.trim()
@@ -82,20 +88,25 @@ export function CaseMatrixPage() {
   const openCreateProject = () => {
     setEditingProject(null);
     form.resetFields();
+    form.setFieldsValue({ items: [{ name: '' }] });
     setProjectModalOpen(true);
   };
-  const openEditProject = (row: MatrixRow) => {
-    const project = projectById.get(row.project_case_id);
-    if (!project) {
-      message.warning('项目详情还在加载，请稍后再试');
-      return;
+  const openEditProject = async (row: MatrixRow) => {
+    setProfileLoading(true);
+    try {
+      const project = await fetchProjectCaseManageProfile(row.project_case_id);
+      setEditingProject(project);
+      form.setFieldsValue(projectToForm(project));
+      setProjectModalOpen(true);
+    } catch {
+      message.error('项目详情加载失败');
+    } finally {
+      setProfileLoading(false);
     }
-    setEditingProject(project);
-    form.setFieldsValue(projectToForm(project));
-    setProjectModalOpen(true);
   };
-  const submitProjectForm = (values: ProjectCasePayload) => {
-    const payload = normalizeProjectPayload(values);
+  const submitProjectForm = (values: ProjectCaseFormValues) => {
+    const stages = editingProject?.stage_owners?.length ? editingProject.stage_owners : stageDefinitions;
+    const payload = normalizeProjectPayload(values, stages);
     if (editingProject) {
       updateMutation.mutate({ id: editingProject.id, payload });
     } else {
@@ -110,7 +121,7 @@ export function CaseMatrixPage() {
       onDeleteProject: (row) => deleteMutation.mutate(row.project_case_id),
       deleteLoading: deleteMutation.isPending
     }),
-    [matrixQuery.data?.columns, canManageProjects, projectById, deleteMutation.isPending]
+    [matrixQuery.data?.columns, canManageProjects, deleteMutation.isPending]
   );
 
   return (
@@ -189,7 +200,8 @@ export function CaseMatrixPage() {
         editingProject={editingProject}
         form={form}
         lookups={lookupsQuery.data}
-        loading={createMutation.isPending || updateMutation.isPending}
+        stageDefinitions={editingProject?.stage_owners?.length ? editingProject.stage_owners : stageDefinitions}
+        loading={createMutation.isPending || updateMutation.isPending || profileLoading}
         onCancel={() => {
           setProjectModalOpen(false);
           setEditingProject(null);
@@ -361,18 +373,35 @@ function rowMatches(row: MatrixRow, keyword: string) {
 type ProjectCaseModalProps = {
   open: boolean;
   editingProject: ProjectCase | null;
-  form: ReturnType<typeof Form.useForm<ProjectCasePayload>>[0];
+  form: ReturnType<typeof Form.useForm<ProjectCaseFormValues>>[0];
   lookups?: LookupResponse;
+  stageDefinitions: StageDefinition[];
   loading: boolean;
   onCancel: () => void;
-  onFinish: (values: ProjectCasePayload) => void;
+  onFinish: (values: ProjectCaseFormValues) => void;
 };
 
-function ProjectCaseModal({ open, editingProject, form, lookups, loading, onCancel, onFinish }: ProjectCaseModalProps) {
+function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinitions, loading, onCancel, onFinish }: ProjectCaseModalProps) {
   const employeeOptions = (lookups?.employees ?? []).map((employee) => ({
     label: employee.name,
     value: employee.id
   }));
+  const ownerOptions = [
+    {
+      label: '人员',
+      options: (lookups?.employees ?? []).map((employee) => ({
+        label: employee.name,
+        value: `employee:${employee.id}`
+      }))
+    },
+    {
+      label: '班组',
+      options: (lookups?.teams ?? []).map((team) => ({
+        label: team.name,
+        value: `team:${team.id}`
+      }))
+    }
+  ];
   return (
     <Modal
       title={editingProject ? '编辑项目' : '新增项目'}
@@ -381,43 +410,96 @@ function ProjectCaseModal({ open, editingProject, form, lookups, loading, onCanc
       onOk={() => form.submit()}
       okText={editingProject ? '保存' : '新增'}
       confirmLoading={loading}
-      width={720}
+      width={920}
       destroyOnClose
     >
-      <Form form={form} layout="vertical" onFinish={onFinish} className="project-form-grid">
-        <Form.Item label="项目名称" name="name" rules={[{ required: true, message: '请输入项目名称' }]}>
-          <Input placeholder="请输入项目名称" />
-        </Form.Item>
-        <Form.Item label="项目编号" name="code">
-          <Input placeholder="例如 P-001" />
-        </Form.Item>
-        <Form.Item label="项目类型" name="category">
-          <Input placeholder="例如 护栏模板" />
-        </Form.Item>
-        <Form.Item label="客户名称" name="customer_name">
-          <Input placeholder="可选" />
-        </Form.Item>
-        <Form.Item label="业务部负责人" name="business_owner_id">
-          <Select allowClear showSearch placeholder="选择业务部负责人" options={employeeOptions} optionFilterProp="label" />
-        </Form.Item>
-        <Form.Item label="设计部负责人" name="design_owner_id">
-          <Select allowClear showSearch placeholder="选择设计部负责人" options={employeeOptions} optionFilterProp="label" />
-        </Form.Item>
-        <Form.Item label="预估重量(T)" name="estimated_weight">
-          <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="可选" />
-        </Form.Item>
-        <Form.Item label="交付日期" name="delivery_date">
-          <Input placeholder="YYYY-MM-DD" />
-        </Form.Item>
-        <Form.Item label="发货情况" name="delivery_status">
-          <Input placeholder="例如 已出货 / 部分待确认" />
-        </Form.Item>
+      <Form form={form} layout="vertical" onFinish={onFinish}>
+        <div className="project-form-grid">
+          <Form.Item label="项目名称" name="name" rules={[{ required: true, message: '请输入项目名称' }]}>
+            <Input placeholder="请输入项目名称" />
+          </Form.Item>
+          <Form.Item label="项目编号" name="code">
+            <Input placeholder="例如 P-001" />
+          </Form.Item>
+          <Form.Item label="项目类型" name="category">
+            <Input placeholder="例如 护栏模板" />
+          </Form.Item>
+          <Form.Item label="客户名称" name="customer_name">
+            <Input placeholder="可选" />
+          </Form.Item>
+          <Form.Item label="预估重量(T)" name="estimated_weight">
+            <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="可选" />
+          </Form.Item>
+          <Form.Item label="业务部负责人" name="business_owner_id">
+            <Select allowClear showSearch placeholder="选择业务部负责人" options={employeeOptions} optionFilterProp="label" />
+          </Form.Item>
+          <Form.Item label="交付日期" name="delivery_date">
+            <Input placeholder="YYYY-MM-DD" />
+          </Form.Item>
+          <Form.Item label="发货情况" name="delivery_status">
+            <Input placeholder="例如 已出货 / 部分待确认" />
+          </Form.Item>
+        </div>
+
+        <Divider orientation="left" plain>子项目名称</Divider>
+        <Form.List name="items">
+          {(fields, { add, remove }) => (
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              {fields.map((field) => (
+                <div className="project-item-row" key={field.key}>
+                  <Form.Item name={[field.name, 'id']} hidden>
+                    <Input />
+                  </Form.Item>
+                  <Form.Item
+                    {...field}
+                    name={[field.name, 'name']}
+                    rules={[{ required: true, message: '请输入子项目名称' }]}
+                    style={{ margin: 0, flex: 1 }}
+                  >
+                    <Input placeholder="请输入子项目名称" />
+                  </Form.Item>
+                  <Form.Item noStyle shouldUpdate>
+                    {({ getFieldValue }) => {
+                      const itemId = getFieldValue(['items', field.name, 'id']);
+                      return itemId ? null : (
+                        <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                      );
+                    }}
+                  </Form.Item>
+                </div>
+              ))}
+              <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ name: '' })}>
+                新增子项目
+              </Button>
+            </Space>
+          )}
+        </Form.List>
+
+        <Divider orientation="left" plain>阶段负责人</Divider>
+        <div className="project-stage-owner-grid">
+          {stageDefinitions.map((stage) => (
+            <Form.Item
+              key={stage.task_type}
+              label={stage.task_name}
+              name={['stage_owner_values', stage.task_type]}
+              tooltip={stage.owner_department_name || undefined}
+            >
+              <Select
+                allowClear
+                showSearch
+                placeholder={stage.mixed ? '多个负责人' : '选择负责人'}
+                options={ownerOptions}
+                optionFilterProp="label"
+              />
+            </Form.Item>
+          ))}
+        </div>
       </Form>
     </Modal>
   );
 }
 
-function projectToForm(project: ProjectCase): ProjectCasePayload {
+function projectToForm(project: ProjectCase): ProjectCaseFormValues {
   return {
     code: project.code ?? null,
     name: project.name,
@@ -427,20 +509,65 @@ function projectToForm(project: ProjectCase): ProjectCasePayload {
     design_owner_id: project.design_owner_id ?? null,
     estimated_weight: project.estimated_weight ?? null,
     delivery_date: project.delivery_date ?? null,
-    delivery_status: project.delivery_status ?? null
+    delivery_status: project.delivery_status ?? null,
+    items: project.items?.length ? project.items.map((item) => ({ id: item.id, name: item.name })) : [{ name: '' }],
+    stage_owner_values: Object.fromEntries(
+      (project.stage_owners ?? []).map((stage) => [stage.task_type, encodeOwnerValue(stage)])
+    )
   };
 }
 
-function normalizeProjectPayload(values: ProjectCasePayload): ProjectCasePayload {
+function normalizeProjectPayload(values: ProjectCaseFormValues, stages: StageDefinition[]): ProjectCasePayload {
+  const items = (values.items ?? [])
+    .map((item) => ({ id: item.id ?? null, name: item.name?.trim() ?? '' }))
+    .filter((item) => item.name);
+  const stageOwners = stages.map((stage) => ({
+    task_type: stage.task_type,
+    ...decodeOwnerValue(values.stage_owner_values?.[stage.task_type])
+  }));
+  const designStageOwner = stageOwners.find((stage) => stage.task_type === 'design');
+  const designOwner = designStageOwner ? designStageOwner.assignee_id ?? null : values.design_owner_id ?? null;
   return {
     code: values.code ?? null,
     name: values.name,
     category: values.category ?? null,
     customer_name: values.customer_name ?? null,
     business_owner_id: values.business_owner_id ?? null,
-    design_owner_id: values.design_owner_id ?? null,
+    design_owner_id: designOwner,
     estimated_weight: values.estimated_weight ?? null,
     delivery_date: values.delivery_date ?? null,
-    delivery_status: values.delivery_status ?? null
+    delivery_status: values.delivery_status ?? null,
+    items,
+    stage_owners: stageOwners
   };
+}
+
+function encodeOwnerValue(stage: Pick<ProjectStageOwner, 'assignee_id' | 'team_id'>) {
+  if (stage.assignee_id) return `employee:${stage.assignee_id}`;
+  if (stage.team_id) return `team:${stage.team_id}`;
+  return undefined;
+}
+
+function decodeOwnerValue(value: string | null | undefined) {
+  if (!value) return { assignee_id: null, team_id: null };
+  const [type, id] = value.split(':');
+  if (type === 'employee') return { assignee_id: id, team_id: null };
+  if (type === 'team') return { assignee_id: null, team_id: id };
+  return { assignee_id: null, team_id: null };
+}
+
+function stageDefinitionsFromColumns(columns: MatrixColumn[]): StageDefinition[] {
+  const seen = new Set<string>();
+  const stages: StageDefinition[] = [];
+  for (const column of columns) {
+    if (!column.taskType || !column.group || seen.has(column.taskType)) continue;
+    seen.add(column.taskType);
+    stages.push({
+      task_type: column.taskType,
+      task_name: column.group,
+      generation_scope: column.taskType === 'design' ? 'case' : 'item',
+      sort_order: stages.length + 1
+    });
+  }
+  return stages;
 }

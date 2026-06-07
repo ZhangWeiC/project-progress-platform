@@ -199,6 +199,19 @@ export type ProjectCaseInput = {
   estimated_weight?: number | null;
   delivery_date?: string | null;
   delivery_status?: string | null;
+  items?: ProjectCaseItemInput[];
+  stage_owners?: ProjectCaseStageOwnerInput[];
+};
+
+export type ProjectCaseItemInput = {
+  id?: string | null;
+  name: string;
+};
+
+export type ProjectCaseStageOwnerInput = {
+  task_type: string;
+  assignee_id?: string | null;
+  team_id?: string | null;
 };
 
 export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
@@ -211,6 +224,7 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
   }
   validateEmployee(input.business_owner_id);
   validateEmployee(input.design_owner_id);
+  validateStageOwners(input.stage_owners);
   const id = makeId('CASE');
   const maxSeq = db.prepare('SELECT COALESCE(MAX(source_seq), 0) as value FROM project_case').get() as { value: number };
   const tx = db.transaction(() => {
@@ -232,15 +246,21 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
       source_seq: Number(maxSeq.value ?? 0) + 1
     });
     syncProjectOwnerMembers(id, input.business_owner_id ?? null, input.design_owner_id ?? null);
+    ensureProjectTasks(id, stageOwnerInputMap(input.stage_owners), input.design_owner_id ?? null);
+    syncCaseItems(id, input.items ?? [], stageOwnerInputMap(input.stage_owners));
+    if (input.stage_owners) applyStageOwners(id, input.stage_owners);
+    syncTaskOwnerMembers(id);
+    recalculateCase(id);
   });
   tx();
-  return getProjectCaseForManager(id);
+  return getProjectCaseManageProfile(id, user);
 }
 
 export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput, user: CurrentUser) {
   assertCanManageProjects(user);
   validateEmployee(input.business_owner_id);
   validateEmployee(input.design_owner_id);
+  validateStageOwners(input.stage_owners);
   const existing = db.prepare('SELECT * FROM project_case WHERE id = ?').get(projectCaseId) as
     | (ProjectCaseInput & { id: string })
     | undefined;
@@ -277,10 +297,18 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
       delivery_status: normalizeText(input.delivery_status === undefined ? existing.delivery_status : input.delivery_status)
     });
     syncProjectOwnerMembers(projectCaseId, nextBusinessOwnerId, nextDesignOwnerId);
-    syncProjectOwnerAssignments(projectCaseId, nextDesignOwnerId);
+    ensureProjectTasks(projectCaseId, stageOwnerInputMap(input.stage_owners), nextDesignOwnerId);
+    syncCaseItems(projectCaseId, input.items, input.stage_owners ? stageOwnerInputMap(input.stage_owners) : getCurrentStageOwnerMap(projectCaseId));
+    if (input.stage_owners) {
+      applyStageOwners(projectCaseId, input.stage_owners);
+    } else {
+      syncProjectOwnerAssignments(projectCaseId, nextDesignOwnerId);
+    }
+    syncTaskOwnerMembers(projectCaseId);
+    recalculateCase(projectCaseId);
   });
   tx();
-  return getProjectCaseForManager(projectCaseId);
+  return getProjectCaseManageProfile(projectCaseId, user);
 }
 
 export function deleteProjectCase(projectCaseId: string, user: CurrentUser) {
@@ -314,20 +342,261 @@ export function deleteProjectCase(projectCaseId: string, user: CurrentUser) {
   return { ok: true };
 }
 
-function getProjectCaseForManager(projectCaseId: string) {
-  return db.prepare(
+export function getProjectCaseManageProfile(projectCaseId: string, user: CurrentUser) {
+  assertCanManageProjects(user);
+  const project = db.prepare(
     `SELECT pc.*, b.name as business_owner_name, d.name as design_owner_name
      FROM project_case pc
      LEFT JOIN employee b ON b.id = pc.business_owner_id
      LEFT JOIN employee d ON d.id = pc.design_owner_id
      WHERE pc.id = ?`
-  ).get(projectCaseId);
+  ).get(projectCaseId) as (Record<string, unknown> & { id: string }) | undefined;
+  if (!project) {
+    const err = new Error('项目不存在');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+  const items = db
+    .prepare('SELECT id, name, progress, status, source_row FROM case_item WHERE project_case_id = ? ORDER BY source_row, id')
+    .all(projectCaseId);
+  return {
+    ...project,
+    items,
+    stage_owners: getProjectStageOwners(projectCaseId)
+  };
+}
+
+function getProjectStageOwners(projectCaseId: string) {
+  const templates = db
+    .prepare(
+      `SELECT tt.task_type, tt.name as task_name, tt.generation_scope, tt.sort_order,
+              d.name as owner_department_name
+       FROM task_template tt
+       LEFT JOIN department d ON d.id = tt.default_owner_department_id
+       ORDER BY tt.sort_order`
+    )
+    .all() as Array<{
+      task_type: string;
+      task_name: string;
+      generation_scope: string;
+      sort_order: number;
+      owner_department_name: string | null;
+    }>;
+  const ownerRows = db.prepare(
+    `SELECT DISTINCT t.assignee_id, e.name as assignee_name, t.team_id, tm.name as team_name
+     FROM case_task t
+     LEFT JOIN employee e ON e.id = t.assignee_id
+     LEFT JOIN team tm ON tm.id = t.team_id
+     WHERE t.project_case_id = ?
+       AND t.task_type = ?`
+  );
+
+  return templates.map((template) => {
+    const owners = ownerRows.all(projectCaseId, template.task_type) as Array<{
+      assignee_id: string | null;
+      assignee_name: string | null;
+      team_id: string | null;
+      team_name: string | null;
+    }>;
+    const uniqueOwners = new Map<string, typeof owners[number]>();
+    for (const owner of owners) {
+      uniqueOwners.set(`${owner.assignee_id ?? ''}:${owner.team_id ?? ''}`, owner);
+    }
+    const ownerList = Array.from(uniqueOwners.values());
+    const mixed = ownerList.length > 1;
+    const owner = !mixed && ownerList.length === 1 ? ownerList[0] : undefined;
+    return {
+      task_type: template.task_type,
+      task_name: template.task_name,
+      generation_scope: template.generation_scope,
+      sort_order: template.sort_order,
+      owner_department_name: template.owner_department_name,
+      assignee_id: owner?.assignee_id ?? null,
+      assignee_name: owner?.assignee_name ?? null,
+      team_id: owner?.team_id ?? null,
+      team_name: owner?.team_name ?? null,
+      mixed
+    };
+  });
 }
 
 function syncProjectOwnerMembers(projectCaseId: string, businessOwnerId: string | null, designOwnerId: string | null) {
   db.prepare("DELETE FROM project_case_member WHERE project_case_id = ? AND role_in_case IN ('business_owner', 'design_owner')").run(projectCaseId);
   if (businessOwnerId) insertProjectMember(projectCaseId, businessOwnerId, 'business_owner');
   if (designOwnerId) insertProjectMember(projectCaseId, designOwnerId, 'design_owner');
+}
+
+function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | undefined, stageOwners: Map<string, StageOwnerValue>) {
+  if (!items) return;
+  const existingItems = new Set(
+    (db.prepare('SELECT id FROM case_item WHERE project_case_id = ?').all(projectCaseId) as Array<{ id: string }>).map((item) => item.id)
+  );
+  const maxRow = db.prepare('SELECT COALESCE(MAX(source_row), 0) as value FROM case_item WHERE project_case_id = ?').get(projectCaseId) as { value: number };
+  let nextRow = Number(maxRow.value ?? 0);
+
+  for (const item of items) {
+    const name = item.name.trim();
+    if (!name) continue;
+    if (item.id) {
+      if (!existingItems.has(item.id)) {
+        const err = new Error('子项目不存在或不属于当前项目');
+        err.name = 'VALIDATION_ERROR';
+        throw err;
+      }
+      db.prepare('UPDATE case_item SET name = ? WHERE id = ?').run(name, item.id);
+      ensureItemTasks(projectCaseId, item.id, stageOwners);
+      continue;
+    }
+
+    const itemId = makeId('ITEM');
+    nextRow += 1;
+    db.prepare(
+      `INSERT INTO case_item
+       (id, project_case_id, name, category, quantity, quantity_unit, piece_count, weight, weight_unit, status, progress, delivery_date, delivery_status, source_row)
+       VALUES (?, ?, ?, '', null, null, null, null, 'T', 'not_started', 0, null, '', ?)`
+    ).run(itemId, projectCaseId, name, nextRow);
+    ensureItemTasks(projectCaseId, itemId, stageOwners);
+  }
+}
+
+type StageOwnerValue = {
+  assignee_id: string | null;
+  team_id: string | null;
+};
+
+function stageOwnerInputMap(stageOwners: ProjectCaseStageOwnerInput[] | undefined) {
+  const map = new Map<string, StageOwnerValue>();
+  for (const owner of stageOwners ?? []) {
+    map.set(owner.task_type, {
+      assignee_id: owner.assignee_id ?? null,
+      team_id: owner.team_id ?? null
+    });
+  }
+  return map;
+}
+
+function getCurrentStageOwnerMap(projectCaseId: string) {
+  const map = new Map<string, StageOwnerValue>();
+  for (const stage of getProjectStageOwners(projectCaseId)) {
+    if (stage.mixed) continue;
+    map.set(stage.task_type, {
+      assignee_id: stage.assignee_id,
+      team_id: stage.team_id
+    });
+  }
+  return map;
+}
+
+function ensureProjectTasks(projectCaseId: string, stageOwners: Map<string, StageOwnerValue>, fallbackDesignOwnerId: string | null) {
+  const caseTemplates = db
+    .prepare("SELECT * FROM task_template WHERE generation_scope = 'case' ORDER BY sort_order")
+    .all() as Array<TaskTemplateRow>;
+  for (const template of caseTemplates) {
+    const fallbackOwner = template.task_type === 'design'
+      ? { assignee_id: fallbackDesignOwnerId, team_id: null }
+      : { assignee_id: null, team_id: null };
+    ensureTaskWithSubtasks(projectCaseId, null, template, stageOwners.get(template.task_type) ?? fallbackOwner);
+  }
+
+  const items = db.prepare('SELECT id FROM case_item WHERE project_case_id = ?').all(projectCaseId) as Array<{ id: string }>;
+  for (const item of items) ensureItemTasks(projectCaseId, item.id, stageOwners);
+}
+
+type TaskTemplateRow = {
+  id: string;
+  name: string;
+  task_type: string;
+  default_owner_department_id: string | null;
+};
+
+function ensureItemTasks(projectCaseId: string, itemId: string, stageOwners: Map<string, StageOwnerValue>) {
+  const itemTemplates = db
+    .prepare("SELECT * FROM task_template WHERE generation_scope = 'item' ORDER BY sort_order")
+    .all() as Array<TaskTemplateRow>;
+  for (const template of itemTemplates) {
+    ensureTaskWithSubtasks(projectCaseId, itemId, template, stageOwners.get(template.task_type) ?? { assignee_id: null, team_id: null });
+  }
+}
+
+function ensureTaskWithSubtasks(projectCaseId: string, itemId: string | null, template: TaskTemplateRow, owner: StageOwnerValue) {
+  const existingTask = itemId
+    ? db.prepare('SELECT id FROM case_task WHERE project_case_id = ? AND case_item_id = ? AND task_type = ? LIMIT 1').get(projectCaseId, itemId, template.task_type) as { id: string } | undefined
+    : db.prepare('SELECT id FROM case_task WHERE project_case_id = ? AND case_item_id IS NULL AND task_type = ? LIMIT 1').get(projectCaseId, template.task_type) as { id: string } | undefined;
+  const taskId = existingTask?.id ?? `TASK-${itemId ?? projectCaseId}-${template.task_type}`;
+  if (!existingTask) {
+    db.prepare(
+      `INSERT INTO case_task
+       (id, project_case_id, case_item_id, task_template_id, name, task_type, owner_department_id, assignee_id, team_id, status, progress, is_delayed, is_applicable, include_in_progress, source_row, source_column, raw_import_value, remark)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_started', 0, 0, 1, 1, null, null, '', '')`
+    ).run(
+      taskId,
+      projectCaseId,
+      itemId,
+      template.id,
+      template.name,
+      template.task_type,
+      template.default_owner_department_id,
+      owner.assignee_id,
+      owner.team_id
+    );
+  }
+  ensureSubtasks(taskId, itemId ?? projectCaseId, template.id, owner);
+}
+
+function ensureSubtasks(taskId: string, idPrefix: string, taskTemplateId: string, owner: StageOwnerValue) {
+  const templates = db
+    .prepare('SELECT id, name, sort_order FROM subtask_template WHERE task_template_id = ? ORDER BY sort_order')
+    .all(taskTemplateId) as Array<{ id: string; name: string; sort_order: number }>;
+  for (const template of templates) {
+    const existing = db
+      .prepare('SELECT id FROM case_subtask WHERE case_task_id = ? AND subtask_template_id = ? LIMIT 1')
+      .get(taskId, template.id);
+    if (existing) continue;
+    db.prepare(
+      `INSERT INTO case_subtask
+       (id, case_task_id, subtask_template_id, parent_subtask_id, name, sort_order, assignee_id, team_id, status, progress, is_applicable, include_in_progress, source_column, raw_import_value, remark)
+       VALUES (?, ?, ?, null, ?, ?, ?, ?, 'not_started', 0, 1, 1, null, '', '')`
+    ).run(`SUB-${idPrefix}-${template.id}`, taskId, template.id, template.name, template.sort_order, owner.assignee_id, owner.team_id);
+  }
+}
+
+function applyStageOwners(projectCaseId: string, stageOwners: ProjectCaseStageOwnerInput[]) {
+  for (const owner of stageOwners) {
+    db.prepare(
+      `UPDATE case_task
+       SET assignee_id = ?, team_id = ?
+       WHERE project_case_id = ?
+         AND task_type = ?`
+    ).run(owner.assignee_id ?? null, owner.team_id ?? null, projectCaseId, owner.task_type);
+    db.prepare(
+      `UPDATE case_subtask
+       SET assignee_id = ?, team_id = ?
+       WHERE case_task_id IN (
+         SELECT id FROM case_task
+         WHERE project_case_id = ?
+           AND task_type = ?
+       )`
+    ).run(owner.assignee_id ?? null, owner.team_id ?? null, projectCaseId, owner.task_type);
+
+    if (owner.task_type === 'design') {
+      db.prepare('UPDATE project_case SET design_owner_id = ? WHERE id = ?').run(owner.assignee_id ?? null, projectCaseId);
+    }
+  }
+  syncTaskOwnerMembers(projectCaseId);
+}
+
+function syncTaskOwnerMembers(projectCaseId: string) {
+  db.prepare("DELETE FROM project_case_member WHERE project_case_id = ? AND source IN ('task', 'stage_owner')").run(projectCaseId);
+  const owners = db.prepare(
+    `SELECT DISTINCT t.task_type, t.assignee_id, tm.leader_id as team_leader_id
+     FROM case_task t
+     LEFT JOIN team tm ON tm.id = t.team_id
+     WHERE t.project_case_id = ?`
+  ).all(projectCaseId) as Array<{ task_type: string; assignee_id: string | null; team_leader_id: string | null }>;
+  for (const owner of owners) {
+    if (owner.assignee_id) insertProjectMember(projectCaseId, owner.assignee_id, `${owner.task_type}_owner`, 'stage_owner');
+    if (owner.team_leader_id) insertProjectMember(projectCaseId, owner.team_leader_id, `${owner.task_type}_team_leader`, 'stage_owner');
+  }
 }
 
 function syncProjectOwnerAssignments(projectCaseId: string, designOwnerId: string | null) {
@@ -350,11 +619,15 @@ function syncProjectOwnerAssignments(projectCaseId: string, designOwnerId: strin
   ).run(designOwnerId, projectCaseId);
 }
 
-function insertProjectMember(projectCaseId: string, userId: string, roleInCase: string) {
+function insertProjectMember(projectCaseId: string, userId: string, roleInCase: string, source = 'case') {
+  const existing = db
+    .prepare('SELECT 1 FROM project_case_member WHERE project_case_id = ? AND user_id = ? AND role_in_case = ? AND source = ?')
+    .get(projectCaseId, userId, roleInCase, source);
+  if (existing) return;
   db.prepare(
     `INSERT INTO project_case_member (id, project_case_id, user_id, role_in_case, source)
-     VALUES (?, ?, ?, ?, 'case')`
-  ).run(makeId('MEM'), projectCaseId, userId, roleInCase);
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(makeId('MEM'), projectCaseId, userId, roleInCase, source);
 }
 
 function validateEmployee(employeeId: string | null | undefined) {
@@ -364,6 +637,37 @@ function validateEmployee(employeeId: string | null | undefined) {
     const err = new Error('负责人不存在');
     err.name = 'VALIDATION_ERROR';
     throw err;
+  }
+}
+
+function validateTeam(teamId: string | null | undefined) {
+  if (!teamId) return;
+  const team = db.prepare('SELECT 1 FROM team WHERE id = ?').get(teamId);
+  if (!team) {
+    const err = new Error('班组不存在');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+}
+
+function validateStageOwners(stageOwners: ProjectCaseStageOwnerInput[] | undefined) {
+  if (!stageOwners) return;
+  const taskTypes = new Set(
+    (db.prepare('SELECT task_type FROM task_template').all() as Array<{ task_type: string }>).map((row) => row.task_type)
+  );
+  for (const owner of stageOwners) {
+    if (!taskTypes.has(owner.task_type)) {
+      const err = new Error('阶段不存在');
+      err.name = 'VALIDATION_ERROR';
+      throw err;
+    }
+    if (owner.assignee_id && owner.team_id) {
+      const err = new Error('同一阶段只能选择一个人员或班组负责人');
+      err.name = 'VALIDATION_ERROR';
+      throw err;
+    }
+    validateEmployee(owner.assignee_id);
+    validateTeam(owner.team_id);
   }
 }
 
@@ -540,8 +844,11 @@ function getVisibleMatrixProjects(user: CurrentUser) {
                FROM project_case pc
                LEFT JOIN employee b ON b.id = pc.business_owner_id
                LEFT JOIN employee de ON de.id = pc.design_owner_id
-               ${canManageProjects(user) ? '' : 'JOIN project_case_member m ON m.project_case_id = pc.id'}
-               ${canManageProjects(user) ? '' : 'WHERE m.user_id = ?'}
+               ${canManageProjects(user) ? '' : `WHERE EXISTS (
+                 SELECT 1 FROM project_case_member m
+                 WHERE m.project_case_id = pc.id
+                   AND m.user_id = ?
+               )`}
                ORDER BY pc.source_seq, pc.id`;
   return (canManageProjects(user)
     ? db.prepare(sql).all()

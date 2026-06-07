@@ -13,10 +13,15 @@ export type ProjectCasePayload = {
   estimated_weight?: number | null;
   delivery_date?: string | null;
   delivery_status?: string | null;
+  items?: Array<{ id?: string | null; name: string }>;
+  stage_owners?: Array<{ task_type: string; assignee_id?: string | null; team_id?: string | null }>;
 };
 
 export const createProjectCase = (payload: ProjectCasePayload) =>
   apiPost<ProjectCase>('/api/cases', payload);
+
+export const fetchProjectCaseManageProfile = (caseId: string) =>
+  apiGet<ProjectCase>(`/api/cases/${caseId}/manage-profile`);
 
 export const updateProjectCase = (caseId: string, payload: ProjectCasePayload) =>
   apiPatch<ProjectCase>(`/api/cases/${caseId}`, payload);
