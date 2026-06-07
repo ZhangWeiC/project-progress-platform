@@ -1130,6 +1130,8 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
 export type ProductionPlanFilters = {
   department_id?: string;
   month?: string;
+  start_date?: string;
+  end_date?: string;
   project_case_id?: string;
   team_id?: string;
 };
@@ -1215,6 +1217,15 @@ export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPla
   const departments = db.prepare('SELECT id, name FROM department ORDER BY name').all();
   const teams = db.prepare('SELECT id, name, leader_id FROM team ORDER BY name').all();
   const projects = db.prepare('SELECT id, name FROM project_case ORDER BY source_seq, id').all();
+  if ((filters.start_date && !filters.end_date) || (!filters.start_date && filters.end_date)) {
+    const err = new Error('请选择完整的开始和结束日期');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+  if (filters.start_date && filters.end_date) {
+    validateScheduleDates(filters.start_date, filters.end_date);
+  }
+  const hasDateRange = Boolean(filters.start_date && filters.end_date);
 
   const planWhere: string[] = [];
   const planParams: unknown[] = [];
@@ -1222,7 +1233,10 @@ export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPla
     planWhere.push('pp.department_id = ?');
     planParams.push(filters.department_id);
   }
-  if (filters.month) {
+  if (hasDateRange) {
+    planWhere.push('pp.start_date <= ? AND pp.end_date >= ?');
+    planParams.push(filters.end_date, filters.start_date);
+  } else if (filters.month) {
     planWhere.push('pp.plan_month = ?');
     planParams.push(filters.month);
   }
@@ -1239,7 +1253,7 @@ export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPla
     .get(...planParams) as ProductionPlanRow | undefined;
 
   if (!plan && filters.department_id) {
-    plan = ensureProductionPlan(filters.department_id, filters.month ?? monthOptions[0]?.plan_month ?? nowIso().slice(0, 7));
+    plan = ensureProductionPlan(filters.department_id, filters.start_date?.slice(0, 7) ?? filters.month ?? monthOptions[0]?.plan_month ?? nowIso().slice(0, 7));
   }
 
   if (!plan) {
@@ -1259,8 +1273,21 @@ export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPla
     };
   }
 
-  const itemWhere = ['ppi.production_plan_id = ?'];
-  const itemParams: unknown[] = [plan.id];
+  const rangeStart = filters.start_date ?? plan.start_date;
+  const rangeEnd = filters.end_date ?? plan.end_date;
+  const itemWhere: string[] = [];
+  const itemParams: unknown[] = [];
+  if (hasDateRange) {
+    itemWhere.push('pp.department_id = ?');
+    itemParams.push(plan.department_id);
+    itemWhere.push('pp.start_date <= ? AND pp.end_date >= ?');
+    itemParams.push(rangeEnd, rangeStart);
+  } else {
+    itemWhere.push('ppi.production_plan_id = ?');
+    itemParams.push(plan.id);
+  }
+  itemWhere.push('ppi.planned_start_date <= ? AND ppi.planned_end_date >= ?');
+  itemParams.push(rangeEnd, rangeStart);
   if (filters.project_case_id) {
     itemWhere.push('ppi.project_case_id = ?');
     itemParams.push(filters.project_case_id);
@@ -1294,13 +1321,13 @@ export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPla
        LEFT JOIN case_task ct ON ct.id = ppi.case_task_id
        LEFT JOIN team tm ON tm.id = ppi.assigned_team_id
        WHERE ${itemWhere.join(' AND ')}
-       ORDER BY ppi.sort_order, ppi.id`
+       ORDER BY pp.plan_month, ppi.sort_order, ppi.id`
     )
     .all(...itemParams) as ProductionPlanItemRow[];
 
   const backlogItems = getProductionPlanBacklog(user, plan, filters);
 
-  const dates = enumerateDates(plan.start_date, plan.end_date);
+  const dates = enumerateDates(rangeStart, rangeEnd);
   const linkedProjects = new Set(items.map((item) => item.project_case_id).filter(Boolean));
   const scheduledDays = items.reduce((sum, item) => sum + daysBetween(item.planned_start_date, item.planned_end_date), 0);
   const months = Array.from(new Set([plan.plan_month, ...monthOptions.map((item) => item.plan_month)]));
@@ -1414,16 +1441,34 @@ export function deleteProductionPlanItem(user: CurrentUser, itemId: string) {
 }
 
 function getProductionPlanBacklog(user: CurrentUser, plan: ProductionPlanRow, filters: ProductionPlanFilters) {
+  const hasDateRange = Boolean(filters.start_date && filters.end_date);
   const where = [
     't.owner_department_id = ?',
-    "t.status != 'completed'",
-    `NOT EXISTS (
-       SELECT 1 FROM production_plan_item ppi
-       WHERE ppi.production_plan_id = ?
-         AND ppi.case_task_id = t.id
-     )`
+    "t.status != 'completed'"
   ];
-  const params: unknown[] = [plan.department_id, plan.id];
+  const params: unknown[] = [plan.department_id];
+  if (hasDateRange) {
+    where.push(
+      `NOT EXISTS (
+         SELECT 1 FROM production_plan_item ppi
+         JOIN production_plan scheduled_plan ON scheduled_plan.id = ppi.production_plan_id
+         WHERE scheduled_plan.department_id = ?
+           AND scheduled_plan.start_date <= ?
+           AND scheduled_plan.end_date >= ?
+           AND ppi.case_task_id = t.id
+       )`
+    );
+    params.push(plan.department_id, filters.end_date, filters.start_date);
+  } else {
+    where.push(
+      `NOT EXISTS (
+         SELECT 1 FROM production_plan_item ppi
+         WHERE ppi.production_plan_id = ?
+           AND ppi.case_task_id = t.id
+       )`
+    );
+    params.push(plan.id);
+  }
   if (filters.project_case_id) {
     where.push('t.project_case_id = ?');
     params.push(filters.project_case_id);
