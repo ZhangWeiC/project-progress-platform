@@ -418,6 +418,164 @@ body {
   background: #d65c4f;
 }
 
+.gantt-legend .ant-tag {
+  margin-inline-end: 0;
+}
+
+.gantt-timeline-header {
+  padding: 0 !important;
+  background: #f7faf9 !important;
+}
+
+.gantt-header {
+  overflow: hidden;
+  background: #f7faf9;
+}
+
+.gantt-month-label {
+  height: 24px;
+  line-height: 24px;
+  padding-left: 10px;
+  border-bottom: 1px solid #e4ebe7;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.gantt-day-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--day-count, 30), 34px);
+}
+
+.gantt-day-header {
+  width: 34px;
+  height: 36px;
+  padding-top: 4px;
+  border-right: 1px solid #e5e7eb;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.05;
+  text-align: center;
+}
+
+.gantt-day-header small {
+  display: block;
+  margin-top: 3px;
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.gantt-day-header.is-weekend {
+  background: #eef6f4;
+}
+
+.gantt-timeline-cell {
+  padding: 0 !important;
+  background: #fbfcfd;
+}
+
+.gantt-row-track {
+  position: relative;
+  min-height: 38px;
+  overflow: hidden;
+  background: #fbfcfd;
+}
+
+.gantt-row-track.empty {
+  display: flex;
+  align-items: center;
+  padding-left: 10px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.gantt-grid-lines {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+
+.gantt-grid-lines span {
+  width: 34px;
+  flex: 0 0 34px;
+  border-right: 1px solid #edf0f3;
+}
+
+.gantt-grid-lines span.is-weekend {
+  background: rgba(14, 116, 144, 0.05);
+}
+
+.gantt-bar {
+  position: absolute;
+  top: 7px;
+  height: 24px;
+  border-radius: 4px;
+  background: #4f8d2f;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 24px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.gantt-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--bar-progress);
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.gantt-bar-label {
+  position: relative;
+  display: block;
+  padding: 0 42px 0 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gantt-bar-progress {
+  position: absolute;
+  top: 0;
+  right: 7px;
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.gantt-bar.task-cutting {
+  background: #0891b2;
+}
+
+.gantt-bar.task-production {
+  background: #3f7f2d;
+}
+
+.gantt-bar.task-painting {
+  background: #7c3aed;
+}
+
+.gantt-bar.task-delivery {
+  background: #2563eb;
+}
+
+.gantt-bar.task-material {
+  background: #b7791f;
+}
+
+.gantt-bar.task-inspection {
+  background: #0f766e;
+}
+
+.gantt-bar.status-completed {
+  background: #64748b;
+}
+
+.gantt-bar.status-delayed {
+  background: #dc2626;
+}
+
 .schedule-backlog-card .ant-card-body,
 .production-plan-card .ant-card-body {
   padding: 10px;
