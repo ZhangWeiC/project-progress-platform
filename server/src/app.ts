@@ -11,6 +11,7 @@ import {
   getAllMatrix,
   getCurrentUser,
   getMatrix,
+  getProductionPlanBoard,
   getProjectCaseManageProfile,
   getTaskDetails,
   updateProgress,
@@ -191,6 +192,17 @@ app.get('/api/cases/:id/matrix', async (request) => {
   const user = getCurrentUser(request.headers);
   const { id } = z.object({ id: z.string() }).parse(request.params);
   return getMatrix(id, user);
+});
+
+app.get('/api/production-plans/board', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const query = z.object({
+    department_id: z.string().optional(),
+    month: z.string().optional(),
+    project_case_id: z.string().optional(),
+    team_id: z.string().optional()
+  }).parse(request.query);
+  return getProductionPlanBoard(user, query);
 });
 
 app.get('/api/tasks/:id', async (request) => {

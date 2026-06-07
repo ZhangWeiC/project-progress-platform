@@ -241,3 +241,56 @@ export type WorkflowTemplate = {
   description?: string;
   stages: WorkflowStage[];
 };
+
+export type ProductionPlan = {
+  id: string;
+  department_id: string;
+  department_name: string;
+  plan_month: string;
+  name: string;
+  status: string;
+  start_date: string;
+  end_date: string;
+  source_sheet?: string | null;
+};
+
+export type ProductionPlanItem = {
+  id: string;
+  production_plan_id: string;
+  project_case_id?: string | null;
+  project_case_name?: string | null;
+  case_item_id?: string | null;
+  case_item_name?: string | null;
+  case_task_id?: string | null;
+  task_type?: string | null;
+  task_name?: string | null;
+  name: string;
+  sort_order: number;
+  planned_start_date: string;
+  planned_end_date: string;
+  assigned_team_id?: string | null;
+  assigned_team_name?: string | null;
+  progress: number;
+  status: string;
+  effective_status: string;
+  duration_days: number;
+  remark?: string | null;
+};
+
+export type ProductionPlanBoardResponse = {
+  plan: ProductionPlan | null;
+  dates: string[];
+  items: ProductionPlanItem[];
+  summary: {
+    item_count: number;
+    linked_project_count: number;
+    scheduled_days: number;
+    completed_count: number;
+  };
+  filters: {
+    departments: Array<{ id: string; name: string }>;
+    teams: Array<{ id: string; name: string; leader_id?: string }>;
+    projects: Array<{ id: string; name: string }>;
+    months: string[];
+  };
+};

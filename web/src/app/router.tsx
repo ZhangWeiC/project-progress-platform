@@ -3,6 +3,7 @@ import { AppShell } from '../components/common/AppShell';
 import { DashboardPage } from '../pages/dashboard/DashboardPage';
 import { CaseMatrixPage } from '../pages/cases/CaseMatrixPage';
 import { WorkLogsPage } from '../pages/work-logs/WorkLogsPage';
+import { ProductionPlansPage } from '../pages/production-plans/ProductionPlansPage';
 import { ExceptionsPage } from '../pages/exceptions/ExceptionsPage';
 import { ImportsPage } from '../pages/imports/ImportsPage';
 import { ReportsPage } from '../pages/reports/ReportsPage';
@@ -25,6 +26,7 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: 'dashboard', element: <DashboardPage /> },
       { path: 'cases', element: <CaseMatrixPage /> },
+      { path: 'production-plans', element: <ProductionPlansPage /> },
       { path: 'work-logs', element: <WorkLogsPage /> },
       { path: 'exceptions', element: <ExceptionsPage /> },
       { path: 'imports', element: <ImportsPage /> },

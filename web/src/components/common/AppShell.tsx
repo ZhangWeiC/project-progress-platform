@@ -1,4 +1,4 @@
-import { AppstoreOutlined, BarChartOutlined, DashboardOutlined, ExceptionOutlined, FileExcelOutlined, FormOutlined, LogoutOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, BarChartOutlined, CalendarOutlined, DashboardOutlined, ExceptionOutlined, FileExcelOutlined, FormOutlined, LogoutOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons';
 import { Avatar, Button, Layout, Menu, Space, Typography } from 'antd';
 import { useQueryClient } from '@tanstack/react-query';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -9,6 +9,7 @@ const { Header, Sider, Content } = Layout;
 const menuItems = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: '业务工作台' },
   { key: '/cases', icon: <AppstoreOutlined />, label: '进度总表' },
+  { key: '/production-plans', icon: <CalendarOutlined />, label: '生产计划' },
   { key: '/work-logs', icon: <FormOutlined />, label: '日报工时' },
   { key: '/exceptions', icon: <ExceptionOutlined />, label: '异常协同' },
   { key: '/imports', icon: <FileExcelOutlined />, label: 'Excel 导入' },

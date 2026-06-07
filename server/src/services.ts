@@ -1126,3 +1126,176 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
 
   return { projectCase, columns, rows };
 }
+
+export type ProductionPlanFilters = {
+  department_id?: string;
+  month?: string;
+  project_case_id?: string;
+  team_id?: string;
+};
+
+type ProductionPlanRow = {
+  id: string;
+  department_id: string;
+  department_name: string;
+  plan_month: string;
+  name: string;
+  status: string;
+  start_date: string;
+  end_date: string;
+  source_sheet: string | null;
+};
+
+type ProductionPlanItemRow = {
+  id: string;
+  production_plan_id: string;
+  project_case_id: string | null;
+  project_case_name: string | null;
+  case_item_id: string | null;
+  case_item_name: string | null;
+  case_task_id: string | null;
+  task_type: string | null;
+  task_name: string | null;
+  name: string;
+  sort_order: number;
+  planned_start_date: string;
+  planned_end_date: string;
+  assigned_team_id: string | null;
+  assigned_team_name: string | null;
+  progress: number;
+  status: string;
+  remark: string | null;
+};
+
+export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPlanFilters) {
+  const monthOptions = db
+    .prepare('SELECT DISTINCT plan_month FROM production_plan ORDER BY plan_month DESC')
+    .all() as Array<{ plan_month: string }>;
+  const departments = db.prepare('SELECT id, name FROM department ORDER BY name').all();
+  const teams = db.prepare('SELECT id, name, leader_id FROM team ORDER BY name').all();
+  const projects = db.prepare('SELECT id, name FROM project_case ORDER BY source_seq, id').all();
+
+  const planWhere: string[] = [];
+  const planParams: unknown[] = [];
+  if (filters.department_id) {
+    planWhere.push('pp.department_id = ?');
+    planParams.push(filters.department_id);
+  }
+  if (filters.month) {
+    planWhere.push('pp.plan_month = ?');
+    planParams.push(filters.month);
+  }
+  const planWhereSql = planWhere.length ? `WHERE ${planWhere.join(' AND ')}` : '';
+  const plan = db
+    .prepare(
+      `SELECT pp.*, d.name as department_name
+       FROM production_plan pp
+       JOIN department d ON d.id = pp.department_id
+       ${planWhereSql}
+       ORDER BY pp.plan_month DESC, d.name
+       LIMIT 1`
+    )
+    .get(...planParams) as ProductionPlanRow | undefined;
+
+  if (!plan) {
+    return {
+      plan: null,
+      dates: [],
+      items: [],
+      summary: { item_count: 0, linked_project_count: 0, scheduled_days: 0, completed_count: 0 },
+      filters: {
+        departments,
+        teams,
+        projects,
+        months: monthOptions.map((item) => item.plan_month)
+      }
+    };
+  }
+
+  const itemWhere = ['ppi.production_plan_id = ?'];
+  const itemParams: unknown[] = [plan.id];
+  if (filters.project_case_id) {
+    itemWhere.push('ppi.project_case_id = ?');
+    itemParams.push(filters.project_case_id);
+  }
+  if (filters.team_id) {
+    itemWhere.push('ppi.assigned_team_id = ?');
+    itemParams.push(filters.team_id);
+  }
+  if (!canManageProjects(user)) {
+    const employee = db.prepare('SELECT department_id FROM employee WHERE id = ?').get(user.id) as { department_id: string | null } | undefined;
+    itemWhere.push(
+      `(ppi.project_case_id IN (
+          SELECT project_case_id FROM project_case_member WHERE user_id = ?
+        )
+        OR ppi.assigned_team_id IN (
+          SELECT id FROM team WHERE leader_id = ?
+        )
+        OR pp.department_id = ?)`
+    );
+    itemParams.push(user.id, user.id, employee?.department_id ?? '');
+  }
+
+  const items = db
+    .prepare(
+      `SELECT ppi.*, pc.name as project_case_name, ci.name as case_item_name,
+              ct.name as task_name, tm.name as assigned_team_name
+       FROM production_plan_item ppi
+       JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       LEFT JOIN project_case pc ON pc.id = ppi.project_case_id
+       LEFT JOIN case_item ci ON ci.id = ppi.case_item_id
+       LEFT JOIN case_task ct ON ct.id = ppi.case_task_id
+       LEFT JOIN team tm ON tm.id = ppi.assigned_team_id
+       WHERE ${itemWhere.join(' AND ')}
+       ORDER BY ppi.sort_order, ppi.id`
+    )
+    .all(...itemParams) as ProductionPlanItemRow[];
+
+  const dates = enumerateDates(plan.start_date, plan.end_date);
+  const linkedProjects = new Set(items.map((item) => item.project_case_id).filter(Boolean));
+  const scheduledDays = items.reduce((sum, item) => sum + daysBetween(item.planned_start_date, item.planned_end_date), 0);
+  return {
+    plan,
+    dates,
+    items: items.map((item) => ({
+      ...item,
+      duration_days: daysBetween(item.planned_start_date, item.planned_end_date),
+      effective_status: productionPlanStatus(item)
+    })),
+    summary: {
+      item_count: items.length,
+      linked_project_count: linkedProjects.size,
+      scheduled_days: scheduledDays,
+      completed_count: items.filter((item) => Number(item.progress ?? 0) >= 100 || item.status === 'completed').length
+    },
+    filters: {
+      departments,
+      teams,
+      projects,
+      months: monthOptions.map((item) => item.plan_month)
+    }
+  };
+}
+
+function enumerateDates(startDate: string, endDate: string) {
+  const dates: string[] = [];
+  const current = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+  while (current.getTime() <= end.getTime()) {
+    dates.push(current.toISOString().slice(0, 10));
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+  return dates;
+}
+
+function daysBetween(startDate: string, endDate: string) {
+  const start = new Date(`${startDate}T00:00:00.000Z`).getTime();
+  const end = new Date(`${endDate}T00:00:00.000Z`).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 0;
+  return Math.floor((end - start) / 86400000) + 1;
+}
+
+function productionPlanStatus(item: ProductionPlanItemRow) {
+  if (Number(item.progress ?? 0) >= 100 || item.status === 'completed') return 'completed';
+  return item.status || 'planned';
+}

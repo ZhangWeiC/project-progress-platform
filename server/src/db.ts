@@ -291,6 +291,42 @@ export function initializeDatabase() {
       confirmed_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS production_plan (
+      id TEXT PRIMARY KEY,
+      department_id TEXT NOT NULL,
+      plan_month TEXT NOT NULL,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'published',
+      start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL,
+      source_sheet TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (department_id) REFERENCES department(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS production_plan_item (
+      id TEXT PRIMARY KEY,
+      production_plan_id TEXT NOT NULL,
+      project_case_id TEXT,
+      case_item_id TEXT,
+      case_task_id TEXT,
+      task_type TEXT,
+      name TEXT NOT NULL,
+      sort_order INTEGER NOT NULL,
+      planned_start_date TEXT NOT NULL,
+      planned_end_date TEXT NOT NULL,
+      assigned_team_id TEXT,
+      progress REAL NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'planned',
+      remark TEXT,
+      source_row INTEGER,
+      FOREIGN KEY (production_plan_id) REFERENCES production_plan(id),
+      FOREIGN KEY (project_case_id) REFERENCES project_case(id),
+      FOREIGN KEY (case_item_id) REFERENCES case_item(id),
+      FOREIGN KEY (case_task_id) REFERENCES case_task(id),
+      FOREIGN KEY (assigned_team_id) REFERENCES team(id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_item_case ON case_item(project_case_id);
     CREATE INDEX IF NOT EXISTS idx_task_case ON case_task(project_case_id);
     CREATE INDEX IF NOT EXISTS idx_task_item ON case_task(case_item_id);
@@ -298,12 +334,16 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_work_log_task ON work_log_entry(case_task_id);
     CREATE INDEX IF NOT EXISTS idx_exception_task ON exception_record(case_task_id);
     CREATE INDEX IF NOT EXISTS idx_auth_session_employee ON auth_session(employee_id);
+    CREATE INDEX IF NOT EXISTS idx_production_plan_department_month ON production_plan(department_id, plan_month);
+    CREATE INDEX IF NOT EXISTS idx_production_plan_item_plan ON production_plan_item(production_plan_id);
+    CREATE INDEX IF NOT EXISTS idx_production_plan_item_case ON production_plan_item(project_case_id, case_item_id);
   `);
 
   migratePermissionModel();
   seedDatabase();
   seedCredentials();
   migrateWorkflowModel();
+  seedProductionPlans();
 }
 
 function migratePermissionModel() {
@@ -630,6 +670,85 @@ function seedLogsAndExceptions() {
       updated_at: new Date().toISOString()
     }
   ]);
+}
+
+function seedProductionPlans() {
+  const existing = db.prepare('SELECT COUNT(*) as count FROM production_plan').get() as { count: number };
+  if (existing.count > 0) return;
+
+  const project = (db
+    .prepare("SELECT id FROM project_case WHERE lower(name) LIKE '%mic%' ORDER BY source_seq, id LIMIT 1")
+    .get() as { id: string } | undefined) ??
+    (db.prepare('SELECT id FROM project_case ORDER BY source_seq, id LIMIT 1').get() as { id: string } | undefined);
+  const projectCaseId = project?.id ?? null;
+  const caseItem = projectCaseId
+    ? ((db
+        .prepare("SELECT id FROM case_item WHERE project_case_id = ? AND (lower(name) LIKE '%m1%' OR source_row IS NOT NULL) ORDER BY source_row, id LIMIT 1")
+        .get(projectCaseId) as { id: string } | undefined) ??
+      (db.prepare('SELECT id FROM case_item WHERE project_case_id = ? ORDER BY source_row, id LIMIT 1').get(projectCaseId) as { id: string } | undefined))
+    : undefined;
+  const caseItemId = caseItem?.id ?? null;
+  const productionTask = projectCaseId && caseItemId
+    ? db
+        .prepare("SELECT id FROM case_task WHERE project_case_id = ? AND case_item_id = ? AND task_type = 'production' LIMIT 1")
+        .get(projectCaseId, caseItemId) as { id: string } | undefined
+    : undefined;
+  const deliveryTask = projectCaseId && caseItemId
+    ? db
+        .prepare("SELECT id FROM case_task WHERE project_case_id = ? AND case_item_id = ? AND task_type = 'delivery' LIMIT 1")
+        .get(projectCaseId, caseItemId) as { id: string } | undefined
+    : undefined;
+
+  insertMany('production_plan', [
+    {
+      id: 'PP-202604-production',
+      department_id: 'dept-production',
+      plan_month: '2026-04',
+      name: '生产部 2026年04月排产',
+      status: 'published',
+      start_date: '2026-04-01',
+      end_date: '2026-04-30',
+      source_sheet: 'MIC项目M1和M1H生产计划表',
+      created_at: new Date().toISOString()
+    }
+  ]);
+
+  const taskRows = [
+    ['底模1+2拼装完毕', '2026-04-10', '2026-04-30', 'production'],
+    ['外侧模1装焊完毕', '2026-04-10', '2026-04-30', 'production'],
+    ['外侧模2装焊完毕', '2026-04-10', '2026-04-15', 'production'],
+    ['外侧模3装焊完毕', '2026-04-10', '2026-04-15', 'production'],
+    ['外侧模4装焊完毕', '2026-04-10', '2026-04-15', 'production'],
+    ['外模所有支架装焊完毕', '2026-04-10', '2026-04-15', 'production'],
+    ['外模总拼装及出铁孔嵌补板补料配齐', '2026-04-10', '2026-04-15', 'production'],
+    ['内顶模装焊完毕', '2026-04-10', '2026-04-15', 'production'],
+    ['内侧模1装焊完毕', '2026-04-10', '2026-04-15', 'production'],
+    ['内侧模2装焊完毕', '2026-04-10', '2026-04-15', 'production'],
+    ['内侧模3装焊完毕', '2026-04-10', '2026-04-15', 'production'],
+    ['内侧模4装焊完毕', '2026-04-10', '2026-04-15', 'production'],
+    ['内模顶、底模块拼装焊接完毕', '2026-04-10', '2026-04-15', 'production'],
+    ['内模所有构件总拼装完毕', '2026-04-10', '2026-04-15', 'production'],
+    ['内外模总装后顶部预埋装焊完毕', '2026-04-10', '2026-04-15', 'production'],
+    ['整体验收出货', '2026-04-10', '2026-04-20', 'delivery']
+  ] as Array<[string, string, string, string]>;
+
+  insertMany('production_plan_item', taskRows.map((row, index) => ({
+    id: `PPI-202604-${String(index + 1).padStart(2, '0')}`,
+    production_plan_id: 'PP-202604-production',
+    project_case_id: projectCaseId,
+    case_item_id: caseItemId,
+    case_task_id: row[3] === 'delivery' ? deliveryTask?.id ?? null : productionTask?.id ?? null,
+    task_type: row[3],
+    name: row[0],
+    sort_order: index + 1,
+    planned_start_date: row[1],
+    planned_end_date: row[2],
+    assigned_team_id: 'team-2',
+    progress: 0,
+    status: 'planned',
+    remark: '',
+    source_row: 6 + index * 3
+  })));
 }
 
 function migrateWorkflowModel() {
