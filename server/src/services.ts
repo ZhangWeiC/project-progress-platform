@@ -5,6 +5,7 @@ export type CurrentUser = {
   id: string;
   role: string;
   name: string;
+  permission_level: string;
 };
 
 export function getCurrentUser(headers: Record<string, unknown>): CurrentUser {
@@ -12,7 +13,7 @@ export function getCurrentUser(headers: Record<string, unknown>): CurrentUser {
 }
 
 export function assertCanReadCase(user: CurrentUser, projectCaseId: string) {
-  if (user.role === 'admin') return;
+  if (canManageProjects(user)) return;
   const membership = db
     .prepare('SELECT 1 FROM project_case_member WHERE project_case_id = ? AND user_id = ?')
     .get(projectCaseId, user.id);
@@ -23,8 +24,24 @@ export function assertCanReadCase(user: CurrentUser, projectCaseId: string) {
   }
 }
 
+export function canManageProjects(user: CurrentUser) {
+  return user.role === 'admin' || user.permission_level === 'manager';
+}
+
+export function canEditProgress(user: CurrentUser) {
+  return canManageProjects(user) || user.permission_level === 'editor';
+}
+
+export function assertCanManageProjects(user: CurrentUser) {
+  if (canManageProjects(user)) return;
+  const err = new Error('当前用户不能管理项目');
+  err.name = 'PERMISSION_DENIED';
+  throw err;
+}
+
 export function canEditTask(user: CurrentUser, taskId: string) {
-  if (user.role === 'admin') return true;
+  if (!canEditProgress(user)) return false;
+  if (canManageProjects(user)) return true;
   const task = db.prepare('SELECT assignee_id, team_id FROM case_task WHERE id = ?').get(taskId) as
     | { assignee_id: string | null; team_id: string | null }
     | undefined;
@@ -38,7 +55,8 @@ export function canEditTask(user: CurrentUser, taskId: string) {
 }
 
 export function canEditSubtask(user: CurrentUser, subtaskId: string) {
-  if (user.role === 'admin') return true;
+  if (!canEditProgress(user)) return false;
+  if (canManageProjects(user)) return true;
   const subtask = db
     .prepare(
       `SELECT s.assignee_id, s.team_id, s.case_task_id, t.assignee_id as task_assignee_id, t.team_id as task_team_id
@@ -169,6 +187,189 @@ function roundProgress(value: number) {
 
 function progressStatus(progress: number) {
   return progress >= 100 ? 'completed' : progress > 0 ? 'in_progress' : 'not_started';
+}
+
+export type ProjectCaseInput = {
+  code?: string | null;
+  name?: string;
+  category?: string | null;
+  customer_name?: string | null;
+  business_owner_id?: string | null;
+  design_owner_id?: string | null;
+  estimated_weight?: number | null;
+  delivery_date?: string | null;
+  delivery_status?: string | null;
+};
+
+export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
+  assertCanManageProjects(user);
+  const name = input.name?.trim();
+  if (!name) {
+    const err = new Error('请输入项目名称');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+  validateEmployee(input.business_owner_id);
+  validateEmployee(input.design_owner_id);
+  const id = makeId('CASE');
+  const maxSeq = db.prepare('SELECT COALESCE(MAX(source_seq), 0) as value FROM project_case').get() as { value: number };
+  const tx = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO project_case
+       (id, code, name, category, customer_name, business_owner_id, design_owner_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, source_sheet, source_row, source_seq)
+       VALUES (@id, @code, @name, @category, @customer_name, @business_owner_id, @design_owner_id, @estimated_weight, 'T', 'in_progress', 0, @delivery_date, @delivery_status, 'manual', null, @source_seq)`
+    ).run({
+      id,
+      code: normalizeText(input.code),
+      name,
+      category: normalizeText(input.category),
+      customer_name: normalizeText(input.customer_name),
+      business_owner_id: input.business_owner_id ?? null,
+      design_owner_id: input.design_owner_id ?? null,
+      estimated_weight: input.estimated_weight ?? null,
+      delivery_date: normalizeText(input.delivery_date),
+      delivery_status: normalizeText(input.delivery_status),
+      source_seq: Number(maxSeq.value ?? 0) + 1
+    });
+    syncProjectOwnerMembers(id, input.business_owner_id ?? null, input.design_owner_id ?? null);
+  });
+  tx();
+  return getProjectCaseForManager(id);
+}
+
+export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput, user: CurrentUser) {
+  assertCanManageProjects(user);
+  validateEmployee(input.business_owner_id);
+  validateEmployee(input.design_owner_id);
+  const existing = db.prepare('SELECT * FROM project_case WHERE id = ?').get(projectCaseId) as
+    | (ProjectCaseInput & { id: string })
+    | undefined;
+  if (!existing) {
+    const err = new Error('项目不存在');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+  const nextBusinessOwnerId = input.business_owner_id === undefined ? existing.business_owner_id ?? null : input.business_owner_id ?? null;
+  const nextDesignOwnerId = input.design_owner_id === undefined ? existing.design_owner_id ?? null : input.design_owner_id ?? null;
+  const tx = db.transaction(() => {
+    db.prepare(
+      `UPDATE project_case
+       SET code = @code,
+           name = @name,
+           category = @category,
+           customer_name = @customer_name,
+           business_owner_id = @business_owner_id,
+           design_owner_id = @design_owner_id,
+           estimated_weight = @estimated_weight,
+           delivery_date = @delivery_date,
+           delivery_status = @delivery_status
+       WHERE id = @id`
+    ).run({
+      id: projectCaseId,
+      code: normalizeText(input.code === undefined ? existing.code : input.code),
+      name: (input.name ?? existing.name ?? '').trim(),
+      category: normalizeText(input.category === undefined ? existing.category : input.category),
+      customer_name: normalizeText(input.customer_name === undefined ? existing.customer_name : input.customer_name),
+      business_owner_id: nextBusinessOwnerId,
+      design_owner_id: nextDesignOwnerId,
+      estimated_weight: input.estimated_weight === undefined ? existing.estimated_weight ?? null : input.estimated_weight ?? null,
+      delivery_date: normalizeText(input.delivery_date === undefined ? existing.delivery_date : input.delivery_date),
+      delivery_status: normalizeText(input.delivery_status === undefined ? existing.delivery_status : input.delivery_status)
+    });
+    syncProjectOwnerMembers(projectCaseId, nextBusinessOwnerId, nextDesignOwnerId);
+    syncProjectOwnerAssignments(projectCaseId, nextDesignOwnerId);
+  });
+  tx();
+  return getProjectCaseForManager(projectCaseId);
+}
+
+export function deleteProjectCase(projectCaseId: string, user: CurrentUser) {
+  assertCanManageProjects(user);
+  const existing = db.prepare('SELECT id FROM project_case WHERE id = ?').get(projectCaseId);
+  if (!existing) {
+    const err = new Error('项目不存在');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM exception_comment WHERE exception_id IN (SELECT id FROM exception_record WHERE project_case_id = ?)').run(projectCaseId);
+    db.prepare('DELETE FROM exception_record WHERE project_case_id = ?').run(projectCaseId);
+    db.prepare('DELETE FROM work_log_entry WHERE project_case_id = ?').run(projectCaseId);
+    db.prepare(
+      `DELETE FROM progress_log
+       WHERE (target_type = 'task' AND target_id IN (SELECT id FROM case_task WHERE project_case_id = ?))
+          OR (target_type = 'subtask' AND target_id IN (
+            SELECT s.id FROM case_subtask s
+            JOIN case_task t ON t.id = s.case_task_id
+            WHERE t.project_case_id = ?
+          ))`
+    ).run(projectCaseId, projectCaseId);
+    db.prepare('DELETE FROM case_subtask WHERE case_task_id IN (SELECT id FROM case_task WHERE project_case_id = ?)').run(projectCaseId);
+    db.prepare('DELETE FROM case_task WHERE project_case_id = ?').run(projectCaseId);
+    db.prepare('DELETE FROM case_item WHERE project_case_id = ?').run(projectCaseId);
+    db.prepare('DELETE FROM project_case_member WHERE project_case_id = ?').run(projectCaseId);
+    db.prepare('DELETE FROM project_case WHERE id = ?').run(projectCaseId);
+  });
+  tx();
+  return { ok: true };
+}
+
+function getProjectCaseForManager(projectCaseId: string) {
+  return db.prepare(
+    `SELECT pc.*, b.name as business_owner_name, d.name as design_owner_name
+     FROM project_case pc
+     LEFT JOIN employee b ON b.id = pc.business_owner_id
+     LEFT JOIN employee d ON d.id = pc.design_owner_id
+     WHERE pc.id = ?`
+  ).get(projectCaseId);
+}
+
+function syncProjectOwnerMembers(projectCaseId: string, businessOwnerId: string | null, designOwnerId: string | null) {
+  db.prepare("DELETE FROM project_case_member WHERE project_case_id = ? AND role_in_case IN ('business_owner', 'design_owner')").run(projectCaseId);
+  if (businessOwnerId) insertProjectMember(projectCaseId, businessOwnerId, 'business_owner');
+  if (designOwnerId) insertProjectMember(projectCaseId, designOwnerId, 'design_owner');
+}
+
+function syncProjectOwnerAssignments(projectCaseId: string, designOwnerId: string | null) {
+  db.prepare(
+    `UPDATE case_task
+     SET assignee_id = ?
+     WHERE project_case_id = ?
+       AND case_item_id IS NULL
+       AND task_type = 'design'`
+  ).run(designOwnerId, projectCaseId);
+  db.prepare(
+    `UPDATE case_subtask
+     SET assignee_id = ?
+     WHERE case_task_id IN (
+       SELECT id FROM case_task
+       WHERE project_case_id = ?
+         AND case_item_id IS NULL
+         AND task_type = 'design'
+     )`
+  ).run(designOwnerId, projectCaseId);
+}
+
+function insertProjectMember(projectCaseId: string, userId: string, roleInCase: string) {
+  db.prepare(
+    `INSERT INTO project_case_member (id, project_case_id, user_id, role_in_case, source)
+     VALUES (?, ?, ?, ?, 'case')`
+  ).run(makeId('MEM'), projectCaseId, userId, roleInCase);
+}
+
+function validateEmployee(employeeId: string | null | undefined) {
+  if (!employeeId) return;
+  const employee = db.prepare('SELECT 1 FROM employee WHERE id = ?').get(employeeId);
+  if (!employee) {
+    const err = new Error('负责人不存在');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+}
+
+function normalizeText(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
 }
 
 export function getTaskDetails(taskId: string, user?: CurrentUser) {
@@ -339,10 +540,10 @@ function getVisibleMatrixProjects(user: CurrentUser) {
                FROM project_case pc
                LEFT JOIN employee b ON b.id = pc.business_owner_id
                LEFT JOIN employee de ON de.id = pc.design_owner_id
-               ${user.role === 'admin' ? '' : 'JOIN project_case_member m ON m.project_case_id = pc.id'}
-               ${user.role === 'admin' ? '' : 'WHERE m.user_id = ?'}
+               ${canManageProjects(user) ? '' : 'JOIN project_case_member m ON m.project_case_id = pc.id'}
+               ${canManageProjects(user) ? '' : 'WHERE m.user_id = ?'}
                ORDER BY pc.source_seq, pc.id`;
-  return (user.role === 'admin'
+  return (canManageProjects(user)
     ? db.prepare(sql).all()
     : db.prepare(sql).all(user.id)) as MatrixProject[];
 }

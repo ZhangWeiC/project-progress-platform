@@ -3,7 +3,18 @@ import multipart from '@fastify/multipart';
 import Fastify from 'fastify';
 import { z } from 'zod';
 import { db, initializeDatabase, makeId, nowIso } from './db.js';
-import { getAllMatrix, getCurrentUser, getMatrix, getTaskDetails, updateProgress, assertCanReadCase } from './services.js';
+import {
+  assertCanReadCase,
+  canManageProjects,
+  createProjectCase,
+  deleteProjectCase,
+  getAllMatrix,
+  getCurrentUser,
+  getMatrix,
+  getTaskDetails,
+  updateProgress,
+  updateProjectCase
+} from './services.js';
 import { confirmExcelImport, createExcelImport, getImportPreview } from './importer.js';
 import { login, logout } from './auth.js';
 
@@ -64,7 +75,7 @@ app.get('/api/me', async (request) => {
 
 app.get('/api/cases', async (request) => {
   const user = getCurrentUser(request.headers);
-  if (user.role === 'admin') {
+  if (canManageProjects(user)) {
     return db.prepare(
       `SELECT pc.*, b.name as business_owner_name, d.name as design_owner_name,
               (SELECT COUNT(*) FROM exception_record ex WHERE ex.project_case_id = pc.id AND ex.status NOT IN ('resolved', 'closed', 'cancelled')) as open_exception_count
@@ -84,6 +95,44 @@ app.get('/api/cases', async (request) => {
      WHERE m.user_id = ?
      ORDER BY pc.source_seq`
   ).all(user.id);
+});
+
+const projectCaseFields = {
+  code: z.string().trim().nullable().optional(),
+  category: z.string().trim().nullable().optional(),
+  customer_name: z.string().trim().nullable().optional(),
+  business_owner_id: z.string().nullable().optional(),
+  design_owner_id: z.string().nullable().optional(),
+  estimated_weight: z.number().nullable().optional(),
+  delivery_date: z.string().trim().nullable().optional(),
+  delivery_status: z.string().trim().nullable().optional()
+};
+const projectCaseCreateBody = z.object({
+  ...projectCaseFields,
+  name: z.string().trim().min(1)
+});
+const projectCaseUpdateBody = z.object({
+  ...projectCaseFields,
+  name: z.string().trim().min(1).optional()
+});
+
+app.post('/api/cases', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const body = projectCaseCreateBody.parse(request.body);
+  return createProjectCase(body, user);
+});
+
+app.patch('/api/cases/:id', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const body = projectCaseUpdateBody.parse(request.body);
+  return updateProjectCase(id, body, user);
+});
+
+app.delete('/api/cases/:id', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  return deleteProjectCase(id, user);
 });
 
 app.get('/api/cases/matrix', async (request) => {
@@ -172,7 +221,7 @@ app.get('/api/work-logs', async (request) => {
     where.push('wl.case_task_id = ?');
     params.push(query.case_task_id);
   }
-  if (user.role !== 'admin') {
+  if (!canManageProjects(user)) {
     where.push('wl.project_case_id IN (SELECT project_case_id FROM project_case_member WHERE user_id = ?)');
     params.push(user.id);
   }
@@ -260,7 +309,7 @@ app.get('/api/exceptions', async (request) => {
     where.push('ex.status = ?');
     params.push(query.status);
   }
-  if (user.role !== 'admin') {
+  if (!canManageProjects(user)) {
     where.push('ex.project_case_id IN (SELECT project_case_id FROM project_case_member WHERE user_id = ?)');
     params.push(user.id);
   }
@@ -463,8 +512,8 @@ type WorkbenchTask = {
 
 type WorkbenchException = Record<string, unknown>;
 
-function getMyTasks(user: { id: string; role: string }): WorkbenchTask[] {
-  if (user.role === 'admin') {
+function getMyTasks(user: { id: string; name: string; role: string; permission_level: string }): WorkbenchTask[] {
+  if (canManageProjects(user)) {
     return db.prepare(
       `SELECT t.*, pc.name as case_name, ci.name as item_name, team.name as team_name,
               (SELECT COUNT(*) FROM exception_record ex WHERE ex.case_task_id = t.id AND ex.status NOT IN ('resolved', 'closed', 'cancelled')) as open_exception_count
@@ -488,8 +537,8 @@ function getMyTasks(user: { id: string; role: string }): WorkbenchTask[] {
   ).all(user.id, user.id) as WorkbenchTask[];
 }
 
-function getMyExceptions(user: { id: string; role: string }): WorkbenchException[] {
-  if (user.role === 'admin') {
+function getMyExceptions(user: { id: string; name: string; role: string; permission_level: string }): WorkbenchException[] {
+  if (canManageProjects(user)) {
     return db.prepare(
       `SELECT ex.*, pc.name as case_name, ci.name as item_name, t.name as task_name, s.name as subtask_name,
               dept.name as responsible_department_name

@@ -44,11 +44,18 @@ export type MatrixResponse = {
 
 export type ProjectCase = {
   id: string;
+  code?: string | null;
   name: string;
+  category?: string | null;
+  customer_name?: string | null;
+  business_owner_id?: string | null;
+  design_owner_id?: string | null;
+  estimated_weight?: number | null;
   status: string;
   total_progress: number;
   business_owner_name?: string;
   design_owner_name?: string;
+  delivery_date?: string | null;
   delivery_status?: string;
   open_exception_count?: number;
 };
@@ -135,7 +142,7 @@ export type TaskDetails = {
 };
 
 export type LookupResponse = {
-  employees: Array<{ id: string; name: string; role: string; department_id?: string }>;
+  employees: Array<{ id: string; name: string; role: string; permission_level?: string; department_id?: string }>;
   departments: Array<{ id: string; name: string }>;
   teams: Array<{ id: string; name: string; leader_id?: string }>;
 };

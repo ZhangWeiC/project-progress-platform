@@ -576,8 +576,15 @@ function ensureEmployee(name: string, departmentId: string, role: string) {
   const existing = db.prepare('SELECT id FROM employee WHERE name = ?').get(trimmed) as { id: string } | undefined;
   if (existing) return existing.id;
   const id = stableId('USER', trimmed);
-  db.prepare('INSERT OR IGNORE INTO employee (id, name, department_id, role) VALUES (?, ?, ?, ?)').run(id, trimmed, departmentId, role);
+  db.prepare('INSERT OR IGNORE INTO employee (id, name, department_id, role, permission_level) VALUES (?, ?, ?, ?, ?)')
+    .run(id, trimmed, departmentId, role, defaultPermissionLevel(role));
   return id;
+}
+
+function defaultPermissionLevel(role: string) {
+  if (role === 'admin' || role === 'business_owner') return 'manager';
+  if (['design_owner', 'material_owner', 'quality_owner', 'team_leader'].includes(role)) return 'editor';
+  return 'viewer';
 }
 
 function ensureTeam(name: string) {

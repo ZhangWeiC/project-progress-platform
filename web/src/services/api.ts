@@ -40,6 +40,14 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   return parseResponse<T>(response, path);
 }
 
+export async function apiDelete<T>(path: string): Promise<T> {
+  const response = await fetch(path, {
+    method: 'DELETE',
+    headers: authHeaders()
+  });
+  return parseResponse<T>(response, path);
+}
+
 function authHeaders(): Record<string, string> {
   const token = getAuthSession()?.token;
   return token ? { authorization: `Bearer ${token}` } : {};

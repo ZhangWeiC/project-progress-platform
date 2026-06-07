@@ -1,7 +1,28 @@
-import { apiGet, apiPatch, apiPost, apiUpload } from './api';
+import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from './api';
 import type { ExceptionRecord, ImportTaskPreview, LookupResponse, MatrixResponse, ProjectCase, TaskDetails, WorkflowTemplate, WorkbenchResponse, WorkbenchTask, WorkLogEntry } from '../types';
 
 export const fetchCases = () => apiGet<ProjectCase[]>('/api/cases');
+
+export type ProjectCasePayload = {
+  code?: string | null;
+  name: string;
+  category?: string | null;
+  customer_name?: string | null;
+  business_owner_id?: string | null;
+  design_owner_id?: string | null;
+  estimated_weight?: number | null;
+  delivery_date?: string | null;
+  delivery_status?: string | null;
+};
+
+export const createProjectCase = (payload: ProjectCasePayload) =>
+  apiPost<ProjectCase>('/api/cases', payload);
+
+export const updateProjectCase = (caseId: string, payload: ProjectCasePayload) =>
+  apiPatch<ProjectCase>(`/api/cases/${caseId}`, payload);
+
+export const deleteProjectCase = (caseId: string) =>
+  apiDelete<{ ok: boolean }>(`/api/cases/${caseId}`);
 
 export const fetchAllMatrix = () => apiGet<MatrixResponse>('/api/cases/matrix');
 

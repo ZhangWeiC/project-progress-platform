@@ -24,6 +24,7 @@ export function initializeDatabase() {
       name TEXT NOT NULL,
       department_id TEXT,
       role TEXT NOT NULL,
+      permission_level TEXT NOT NULL DEFAULT 'viewer',
       FOREIGN KEY (department_id) REFERENCES department(id)
     );
 
@@ -299,9 +300,20 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_auth_session_employee ON auth_session(employee_id);
   `);
 
+  migratePermissionModel();
   seedDatabase();
   seedCredentials();
   migrateWorkflowModel();
+}
+
+function migratePermissionModel() {
+  const employeeColumns = db.prepare('PRAGMA table_info(employee)').all() as Array<{ name: string }>;
+  const addedPermissionLevel = !employeeColumns.some((column) => column.name === 'permission_level');
+  if (addedPermissionLevel) {
+    db.prepare("ALTER TABLE employee ADD COLUMN permission_level TEXT NOT NULL DEFAULT 'viewer'").run();
+    db.prepare("UPDATE employee SET permission_level = 'manager' WHERE role IN ('admin', 'business_owner')").run();
+    db.prepare("UPDATE employee SET permission_level = 'editor' WHERE role IN ('design_owner', 'material_owner', 'quality_owner', 'team_leader')").run();
+  }
 }
 
 function insertMany(table: string, rows: Array<Record<string, unknown>>) {
@@ -329,15 +341,15 @@ function seedDatabase() {
   ]);
 
   insertMany('employee', [
-    { id: 'user-admin', name: '管理员', department_id: 'dept-business', role: 'admin' },
-    { id: 'user-zhang', name: '张剑华', department_id: 'dept-business', role: 'business_owner' },
-    { id: 'user-wei-li', name: '魏立', department_id: 'dept-design', role: 'design_owner' },
-    { id: 'user-rao', name: '饶家忠', department_id: 'dept-design', role: 'design_owner' },
-    { id: 'user-wei-zong', name: '魏总', department_id: 'dept-material', role: 'material_owner' },
-    { id: 'user-wang', name: '王世金', department_id: 'dept-production', role: 'team_leader' },
-    { id: 'user-team2', name: '二组班组长', department_id: 'dept-production', role: 'team_leader' },
-    { id: 'user-li', name: '李嘉俊', department_id: 'dept-quality', role: 'quality_owner' },
-    { id: 'user-zhangsan', name: '张三', department_id: 'dept-production', role: 'worker' }
+    { id: 'user-admin', name: '管理员', department_id: 'dept-business', role: 'admin', permission_level: 'manager' },
+    { id: 'user-zhang', name: '张剑华', department_id: 'dept-business', role: 'business_owner', permission_level: 'manager' },
+    { id: 'user-wei-li', name: '魏立', department_id: 'dept-design', role: 'design_owner', permission_level: 'editor' },
+    { id: 'user-rao', name: '饶家忠', department_id: 'dept-design', role: 'design_owner', permission_level: 'editor' },
+    { id: 'user-wei-zong', name: '魏总', department_id: 'dept-material', role: 'material_owner', permission_level: 'editor' },
+    { id: 'user-wang', name: '王世金', department_id: 'dept-production', role: 'team_leader', permission_level: 'editor' },
+    { id: 'user-team2', name: '二组班组长', department_id: 'dept-production', role: 'team_leader', permission_level: 'editor' },
+    { id: 'user-li', name: '李嘉俊', department_id: 'dept-quality', role: 'quality_owner', permission_level: 'editor' },
+    { id: 'user-zhangsan', name: '张三', department_id: 'dept-production', role: 'worker', permission_level: 'viewer' }
   ]);
 
   insertMany('team', [

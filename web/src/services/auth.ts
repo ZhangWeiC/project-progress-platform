@@ -2,6 +2,7 @@ export type AuthUser = {
   id: string;
   name: string;
   role: string;
+  permission_level?: 'manager' | 'editor' | 'viewer';
 };
 
 export type AuthSession = {

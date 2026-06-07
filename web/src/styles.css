@@ -160,6 +160,35 @@ body {
   white-space: nowrap;
 }
 
+.matrix-project-title-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+.matrix-project-title-line .matrix-ellipsis-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.matrix-row-actions {
+  flex: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.matrix-project-row:hover .matrix-row-actions {
+  opacity: 1;
+}
+
+.matrix-row-actions .ant-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+}
+
 .stage-title {
   display: inline-block;
   font-size: 12px;
@@ -295,6 +324,16 @@ body {
 
 .progress-warning {
   color: #b42318;
+}
+
+.project-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+}
+
+.project-form-grid .ant-form-item:first-child {
+  grid-column: 1 / -1;
 }
 
 .form-grid {
