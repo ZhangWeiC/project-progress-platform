@@ -2,7 +2,7 @@ import { CompressOutlined, ExpandAltOutlined, ReloadOutlined, SearchOutlined } f
 import { Button, Card, Input, Space, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Key } from 'react';
 import { TaskDrawer } from '../../components/drawers/TaskDrawer';
 import { ProgressCell } from '../../components/matrix/ProgressCell';
@@ -15,7 +15,6 @@ export function CaseMatrixPage() {
   const [openedTaskId, setOpenedTaskId] = useState<string>();
   const [expandedRowKeys, setExpandedRowKeys] = useState<Key[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
-  const initializedExpansion = useRef(false);
 
   const matrixQuery = useQuery({
     queryKey: ['matrix', 'all'],
@@ -25,14 +24,10 @@ export function CaseMatrixPage() {
   const rows = matrixQuery.data?.rows ?? [];
   const projectRowKeys = useMemo(() => rows.map((row) => row.row_id ?? row.case_item_id), [rows]);
 
-  useEffect(() => {
-    if (projectRowKeys.length > 0 && !initializedExpansion.current) {
-      initializedExpansion.current = true;
-      setExpandedRowKeys(projectRowKeys);
-    }
-  }, [projectRowKeys]);
-
   const filteredRows = useMemo(() => filterRows(rows, searchKeyword), [rows, searchKeyword]);
+  const activeExpandedRowKeys = searchKeyword.trim()
+    ? filteredRows.map((row) => row.row_id ?? row.case_item_id)
+    : expandedRowKeys;
   const tableColumns = useMemo(() => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId), [matrixQuery.data?.columns]);
 
   return (
@@ -82,9 +77,9 @@ export function CaseMatrixPage() {
           bordered
           sticky
           tableLayout="fixed"
-          scroll={{ x: 2960, y: 'calc(100vh - 178px)' }}
+          scroll={{ x: 2440, y: 'calc(100vh - 178px)' }}
           expandable={{
-            expandedRowKeys,
+            expandedRowKeys: activeExpandedRowKeys,
             onExpandedRowsChange: (keys) => setExpandedRowKeys([...keys]),
             indentSize: 14
           }}
@@ -113,7 +108,7 @@ function buildColumns(columns: MatrixColumn[], openTask: (taskId: string) => voi
       dataIndex: column.key,
       key: column.key,
       fixed: 'left' as const,
-      width: column.key === 'case_name' ? 210 : 190,
+      width: column.key === 'case_name' ? 220 : 190,
       className: `matrix-fixed-left matrix-column-${column.key}`,
       render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row)
     }));
@@ -146,7 +141,7 @@ function buildColumns(columns: MatrixColumn[], openTask: (taskId: string) => voi
       children: children.map((child) => ({
         title: child.title,
         key: child.key,
-        width: 98,
+        width: 82,
         align: 'center' as const,
         className: `matrix-stage-cell stage-${stageColor}`,
         onHeaderCell: () => ({ className: `matrix-substage-header stage-${stageColor}` }),

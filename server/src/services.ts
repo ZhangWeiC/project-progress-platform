@@ -196,6 +196,8 @@ export function getTaskDetails(taskId: string, user?: CurrentUser) {
        LEFT JOIN employee e ON e.id = s.assignee_id
        LEFT JOIN team tm ON tm.id = s.team_id
        WHERE s.case_task_id = ?
+         AND (s.subtask_template_id IS NULL OR s.subtask_template_id != 'st-design-confirm')
+         AND s.name != '设计深化'
        ORDER BY s.sort_order`
     )
     .all(taskId) as Array<{ id: string } & Record<string, unknown>>;
@@ -295,6 +297,7 @@ type MatrixCell = {
   targetId?: string;
   taskId?: string;
   ownerName?: string;
+  ownerMerged?: boolean;
   departmentName?: string | null;
   aggregateCount?: number;
 };
@@ -351,6 +354,7 @@ function getMatrixTemplateColumns() {
               st.id as subtask_template_id, st.name as subtask_name, st.sort_order
        FROM task_template tt
        JOIN subtask_template st ON st.task_template_id = tt.id
+       WHERE st.id != 'st-design-confirm'
        ORDER BY tt.sort_order, st.sort_order`
     )
     .all() as MatrixTemplateColumn[];
@@ -390,7 +394,7 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
     case_name: {
       value: project.name,
       status: project.status,
-      ownerName: compactOwners([project.business_owner_name, project.design_owner_name]),
+      ownerName: businessOwnerLabel(project.business_owner_name),
       aggregateCount: children.length
     },
     case_item_name: {
@@ -414,6 +418,11 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
         ownerName: compactOwners(childCells.map((cell) => cell.ownerName)),
         aggregateCount: childCells.length
       };
+      if (hasSingleOwner(childCells)) {
+        for (const cell of childCells) {
+          cell.ownerMerged = true;
+        }
+      }
     }
   }
 
@@ -433,7 +442,7 @@ function buildItemMatrixRow(project: MatrixProject, item: MatrixItem, caseTasks:
   const itemTasks = getMatrixTasks(project.id, item.id);
   const tasks = [...caseTasks, ...itemTasks];
   const cells: Record<string, MatrixCell> = {
-    case_name: { value: '', ownerName: compactOwners([project.business_owner_name, project.design_owner_name]) },
+    case_name: { value: '', ownerName: businessOwnerLabel(project.business_owner_name) },
     case_item_name: { value: item.name, status: item.status, aggregateCount: Math.round(item.progress) },
     delivery_status: { value: item.delivery_status ?? '' },
     open_exception_count: { value: item.open_exception_count }
@@ -506,6 +515,15 @@ function compactOwners(values: Array<string | null | undefined>) {
   return `${owners.slice(0, 2).join(' / ')} +${owners.length - 2}`;
 }
 
+function businessOwnerLabel(name: string | null | undefined) {
+  return name ? `业务部负责人：${name}` : '业务部负责人';
+}
+
+function hasSingleOwner(cells: MatrixCell[]) {
+  const owners = new Set(cells.map((cell) => cell.ownerName).filter(Boolean));
+  return cells.length > 1 && cells.every((cell) => Boolean(cell.ownerName)) && owners.size === 1;
+}
+
 export function getMatrix(projectCaseId: string, user: CurrentUser) {
   assertCanReadCase(user, projectCaseId);
   const projectCase = db
@@ -534,6 +552,7 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
               st.id as subtask_template_id, st.name as subtask_name, st.sort_order
        FROM task_template tt
        JOIN subtask_template st ON st.task_template_id = tt.id
+       WHERE st.id != 'st-design-confirm'
        ORDER BY tt.sort_order, st.sort_order`
     )
     .all() as Array<{ task_type: string; task_name: string; generation_scope: string; subtask_template_id: string; subtask_name: string; sort_order: number }>;

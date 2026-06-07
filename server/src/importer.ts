@@ -386,7 +386,6 @@ function importProject(project: ParsedProject, sourceSheet: string) {
 
   ensureCaseMember(projectId, businessOwnerId, 'business_owner', 'import');
   ensureCaseMember(projectId, designOwnerId, 'design_owner', 'import');
-  const designConfirmProgress = designOwnerId ? 100 : 0;
   const drawingReviewProgress = project.drawingReviewProgress ?? 0;
   const designTaskId = upsertCaseTask(
     projectId,
@@ -397,31 +396,17 @@ function importProject(project: ParsedProject, sourceSheet: string) {
     'dept-design',
     designOwnerId,
     null,
-    average([designConfirmProgress, drawingReviewProgress]),
+    drawingReviewProgress,
     project.sourceRow,
     null,
     ''
   );
   upsertCaseSubtask({
-    id: `SUB-${projectId}-st-design-confirm`,
-    taskId: designTaskId,
-    templateId: 'st-design-confirm',
-    name: '设计深化',
-    sortOrder: 10,
-    assigneeId: designOwnerId,
-    teamId: null,
-    progress: designConfirmProgress,
-    plannedQuantity: null,
-    quantityUnit: null,
-    sourceColumn: 'E',
-    rawValue: project.designOwnerName
-  });
-  upsertCaseSubtask({
     id: `SUB-${projectId}-st-drawing-review`,
     taskId: designTaskId,
     templateId: 'st-drawing-review',
     name: '图纸定审',
-    sortOrder: 20,
+    sortOrder: 10,
     assigneeId: designOwnerId,
     teamId: null,
     progress: drawingReviewProgress,

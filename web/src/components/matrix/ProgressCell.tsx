@@ -1,5 +1,5 @@
 import { LockOutlined, WarningOutlined } from '@ant-design/icons';
-import { Button, Progress, Space, Tooltip } from 'antd';
+import { Button, Space, Tooltip } from 'antd';
 import type { MatrixCell } from '../../types';
 
 type Props = {
@@ -12,6 +12,8 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
   const value = typeof cell.value === 'number' ? cell.value : null;
   const editable = Boolean(cell.editable);
   const isAggregate = !cell.targetId;
+  const owner = cell.ownerMerged ? '' : cell.ownerName;
+  const formattedValue = value === null ? null : `${Math.round(value)}%`;
 
   if (cell.targetId && cell.taskId) {
     return (
@@ -22,24 +24,14 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
         onClick={() => onOpenTask?.(cell.taskId!)}
       >
         <Space size={4}>
-          {value === null ? (
-            <span className="empty-cell">-</span>
-          ) : (
-            <Progress
-              percent={Math.round(value)}
-              size="small"
-              strokeWidth={5}
-              status={value >= 100 ? 'success' : value <= 0 ? 'normal' : 'active'}
-              format={(percent) => `${percent}%`}
-            />
-          )}
+          {formattedValue === null ? <span className="empty-cell">-</span> : <span className="progress-value">{formattedValue}</span>}
           {!editable && (
             <Tooltip title="当前用户不可编辑">
               <LockOutlined className="muted-icon" />
             </Tooltip>
           )}
         </Space>
-        {cell.ownerName && <span className="progress-owner">{cell.ownerName}</span>}
+        {owner && <span className="progress-owner">{owner}</span>}
       </Button>
     );
   }
@@ -47,13 +39,8 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
   if (isAggregate && value !== null) {
     return (
       <div className="progress-cell-summary">
-        <Progress
-          percent={Math.round(value)}
-          size="small"
-          strokeWidth={5}
-          status={value >= 100 ? 'success' : value <= 0 ? 'normal' : 'active'}
-        />
-        {cell.ownerName && <span className="progress-owner">{cell.ownerName}</span>}
+        <span className="progress-value">{formattedValue}</span>
+        {owner && <span className="progress-owner">{owner}</span>}
       </div>
     );
   }
@@ -63,7 +50,7 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
   }
 
   if (typeof cell.value === 'number') {
-    return <span>{cell.value}</span>;
+    return <span>{formattedValue}</span>;
   }
 
   if (cell.value === null || cell.value === '') {

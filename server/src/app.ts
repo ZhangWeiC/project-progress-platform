@@ -424,7 +424,7 @@ app.get('/api/workflow-template', async () => {
     )
     .all(template.id) as Array<Record<string, unknown> & { id: string }>;
   const subtasks = db
-    .prepare('SELECT * FROM subtask_template WHERE task_template_id = ? ORDER BY sort_order');
+    .prepare("SELECT * FROM subtask_template WHERE task_template_id = ? AND id != 'st-design-confirm' ORDER BY sort_order");
   return {
     ...template,
     stages: stages.map((stage) => ({

@@ -15,6 +15,7 @@ export type MatrixCell = {
   targetId?: string;
   taskId?: string;
   ownerName?: string;
+  ownerMerged?: boolean;
   departmentName?: string | null;
   aggregateCount?: number;
 };
