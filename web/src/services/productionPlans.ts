@@ -4,6 +4,8 @@ import type { ProductionPlanBoardResponse } from '../types';
 export type ProductionPlanBoardFilters = {
   department_id?: string;
   month?: string;
+  start_date?: string;
+  end_date?: string;
   project_case_id?: string;
   team_id?: string;
 };

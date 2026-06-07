@@ -218,6 +218,8 @@ app.get('/api/production-plans/board', async (request) => {
   const query = z.object({
     department_id: z.string().optional(),
     month: z.string().optional(),
+    start_date: z.string().optional(),
+    end_date: z.string().optional(),
     project_case_id: z.string().optional(),
     team_id: z.string().optional()
   }).parse(request.query);

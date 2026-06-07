@@ -64,6 +64,12 @@ export function ProductionPlansPage() {
   });
   const board = boardQuery.data;
   const plan = board?.plan;
+  const dateRangeValue = filters.start_date && filters.end_date
+    ? [dayjs(filters.start_date), dayjs(filters.end_date)] as [Dayjs, Dayjs]
+    : undefined;
+  const rangeLabel = filters.start_date && filters.end_date
+    ? `${filters.start_date} 至 ${filters.end_date}`
+    : plan?.plan_month;
 
   const filteredBacklog = useMemo(() => {
     const normalized = keyword.trim().toLowerCase();
@@ -112,7 +118,7 @@ export function ProductionPlansPage() {
   });
 
   const openCreateSchedule = (backlog: ProductionPlanBacklogItem) => {
-    const dates = defaultScheduleDates(plan?.start_date);
+    const dates = defaultScheduleDates(filters.start_date ?? plan?.start_date);
     setBacklogOpen(false);
     setEditingItem(null);
     setSelectedBacklog(backlog);
@@ -162,7 +168,7 @@ export function ProductionPlansPage() {
       ...payload,
       case_task_id: selectedBacklog.task_id,
       department_id: plan?.department_id ?? selectedBacklog.owner_department_id,
-      month: plan?.plan_month ?? start.format('YYYY-MM')
+      month: start.format('YYYY-MM')
     });
   };
 
@@ -182,7 +188,7 @@ export function ProductionPlansPage() {
               生产计划
             </Typography.Title>
             <Typography.Text type="secondary">
-              {plan ? `${plan.department_name} / ${plan.plan_month}` : '先从待排期任务池生成部门甘特图'}
+              {plan ? `${plan.department_name} / ${rangeLabel}` : '先从待排期任务池生成部门甘特图'}
             </Typography.Text>
           </Space>
           <Space wrap>
@@ -196,13 +202,17 @@ export function ProductionPlansPage() {
               style={{ width: 140 }}
               onChange={(value) => setFilters((current) => ({ ...current, department_id: value }))}
             />
-            <Select
+            <DatePicker.RangePicker
               allowClear
-              placeholder="月份"
-              value={filters.month}
-              options={(board?.filters.months ?? []).map((month) => ({ value: month, label: month }))}
-              style={{ width: 120 }}
-              onChange={(value) => setFilters((current) => ({ ...current, month: value }))}
+              value={dateRangeValue}
+              placeholder={['开始日期', '结束日期']}
+              style={{ width: 240 }}
+              onChange={(dates) => setFilters((current) => ({
+                ...current,
+                month: undefined,
+                start_date: dates?.[0]?.format('YYYY-MM-DD'),
+                end_date: dates?.[1]?.format('YYYY-MM-DD')
+              }))}
             />
             <Select
               allowClear
