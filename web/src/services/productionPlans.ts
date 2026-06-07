@@ -1,4 +1,4 @@
-import { apiGet } from './api';
+import { apiDelete, apiGet, apiPatch, apiPost } from './api';
 import type { ProductionPlanBoardResponse } from '../types';
 
 export type ProductionPlanBoardFilters = {
@@ -16,3 +16,25 @@ export const fetchProductionPlanBoard = (filters: ProductionPlanBoardFilters) =>
   const query = params.toString();
   return apiGet<ProductionPlanBoardResponse>(`/api/production-plans/board${query ? `?${query}` : ''}`);
 };
+
+export type ProductionPlanItemPayload = {
+  department_id?: string;
+  month?: string;
+  case_task_id?: string;
+  name?: string;
+  planned_start_date?: string;
+  planned_end_date?: string;
+  assigned_team_id?: string | null;
+  progress?: number;
+  status?: string;
+  remark?: string;
+};
+
+export const createProductionPlanItem = (payload: ProductionPlanItemPayload & { case_task_id: string; planned_start_date: string; planned_end_date: string }) =>
+  apiPost<{ ok: boolean }>('/api/production-plans/items', payload);
+
+export const updateProductionPlanItem = (itemId: string, payload: ProductionPlanItemPayload) =>
+  apiPatch<{ ok: boolean }>(`/api/production-plans/items/${itemId}`, payload);
+
+export const deleteProductionPlanItem = (itemId: string) =>
+  apiDelete<{ ok: boolean }>(`/api/production-plans/items/${itemId}`);

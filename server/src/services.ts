@@ -1134,6 +1134,28 @@ export type ProductionPlanFilters = {
   team_id?: string;
 };
 
+export type CreateProductionPlanItemInput = {
+  department_id?: string;
+  month?: string;
+  case_task_id: string;
+  name?: string;
+  planned_start_date: string;
+  planned_end_date: string;
+  assigned_team_id?: string | null;
+  progress?: number;
+  remark?: string;
+};
+
+export type UpdateProductionPlanItemInput = {
+  name?: string;
+  planned_start_date?: string;
+  planned_end_date?: string;
+  assigned_team_id?: string | null;
+  progress?: number;
+  status?: string;
+  remark?: string;
+};
+
 type ProductionPlanRow = {
   id: string;
   department_id: string;
@@ -1167,6 +1189,25 @@ type ProductionPlanItemRow = {
   remark: string | null;
 };
 
+type ProductionPlanBacklogRow = {
+  task_id: string;
+  project_case_id: string;
+  project_case_name: string;
+  case_item_id: string | null;
+  case_item_name: string | null;
+  task_type: string;
+  task_name: string;
+  owner_department_id: string;
+  owner_department_name: string | null;
+  assignee_id: string | null;
+  assignee_name: string | null;
+  team_id: string | null;
+  team_name: string | null;
+  progress: number;
+  status: string;
+  open_exception_count: number;
+};
+
 export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPlanFilters) {
   const monthOptions = db
     .prepare('SELECT DISTINCT plan_month FROM production_plan ORDER BY plan_month DESC')
@@ -1186,7 +1227,7 @@ export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPla
     planParams.push(filters.month);
   }
   const planWhereSql = planWhere.length ? `WHERE ${planWhere.join(' AND ')}` : '';
-  const plan = db
+  let plan = db
     .prepare(
       `SELECT pp.*, d.name as department_name
        FROM production_plan pp
@@ -1197,17 +1238,23 @@ export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPla
     )
     .get(...planParams) as ProductionPlanRow | undefined;
 
+  if (!plan && filters.department_id) {
+    plan = ensureProductionPlan(filters.department_id, filters.month ?? monthOptions[0]?.plan_month ?? nowIso().slice(0, 7));
+  }
+
   if (!plan) {
+    const months = monthOptions.map((item) => item.plan_month);
     return {
       plan: null,
       dates: [],
       items: [],
-      summary: { item_count: 0, linked_project_count: 0, scheduled_days: 0, completed_count: 0 },
+      backlog_items: [],
+      summary: { item_count: 0, linked_project_count: 0, scheduled_days: 0, completed_count: 0, backlog_count: 0 },
       filters: {
         departments,
         teams,
         projects,
-        months: monthOptions.map((item) => item.plan_month)
+        months
       }
     };
   }
@@ -1251,9 +1298,12 @@ export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPla
     )
     .all(...itemParams) as ProductionPlanItemRow[];
 
+  const backlogItems = getProductionPlanBacklog(user, plan, filters);
+
   const dates = enumerateDates(plan.start_date, plan.end_date);
   const linkedProjects = new Set(items.map((item) => item.project_case_id).filter(Boolean));
   const scheduledDays = items.reduce((sum, item) => sum + daysBetween(item.planned_start_date, item.planned_end_date), 0);
+  const months = Array.from(new Set([plan.plan_month, ...monthOptions.map((item) => item.plan_month)]));
   return {
     plan,
     dates,
@@ -1262,19 +1312,159 @@ export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPla
       duration_days: daysBetween(item.planned_start_date, item.planned_end_date),
       effective_status: productionPlanStatus(item)
     })),
+    backlog_items: backlogItems,
     summary: {
       item_count: items.length,
       linked_project_count: linkedProjects.size,
       scheduled_days: scheduledDays,
-      completed_count: items.filter((item) => Number(item.progress ?? 0) >= 100 || item.status === 'completed').length
+      completed_count: items.filter((item) => Number(item.progress ?? 0) >= 100 || item.status === 'completed').length,
+      backlog_count: backlogItems.length
     },
     filters: {
       departments,
       teams,
       projects,
-      months: monthOptions.map((item) => item.plan_month)
+      months
     }
   };
+}
+
+export function createProductionPlanItem(user: CurrentUser, input: CreateProductionPlanItemInput) {
+  const task = getSchedulableTask(input.case_task_id);
+  assertCanReadCase(user, task.project_case_id);
+  assertCanEditProductionPlanDepartment(user, input.department_id ?? task.owner_department_id);
+  validateScheduleDates(input.planned_start_date, input.planned_end_date);
+
+  const month = input.month ?? input.planned_start_date.slice(0, 7);
+  const departmentId = input.department_id ?? task.owner_department_id;
+  const plan = ensureProductionPlan(departmentId, month);
+  const maxOrder = db
+    .prepare('SELECT COALESCE(MAX(sort_order), 0) as max_order FROM production_plan_item WHERE production_plan_id = ?')
+    .get(plan.id) as { max_order: number };
+  const progress = normalizePlanProgress(input.progress ?? task.progress);
+  const status = productionPlanStatusFromProgress(progress, 'planned');
+  const name = input.name?.trim() || task.task_name;
+
+  db.prepare(
+    `INSERT INTO production_plan_item
+     (id, production_plan_id, project_case_id, case_item_id, case_task_id, task_type, name, sort_order,
+      planned_start_date, planned_end_date, assigned_team_id, progress, status, remark, source_row)
+     VALUES (@id, @production_plan_id, @project_case_id, @case_item_id, @case_task_id, @task_type, @name, @sort_order,
+      @planned_start_date, @planned_end_date, @assigned_team_id, @progress, @status, @remark, null)`
+  ).run({
+    id: makeId('PPI'),
+    production_plan_id: plan.id,
+    project_case_id: task.project_case_id,
+    case_item_id: task.case_item_id,
+    case_task_id: task.task_id,
+    task_type: task.task_type,
+    name,
+    sort_order: maxOrder.max_order + 1,
+    planned_start_date: input.planned_start_date,
+    planned_end_date: input.planned_end_date,
+    assigned_team_id: input.assigned_team_id ?? task.team_id ?? null,
+    progress,
+    status,
+    remark: input.remark ?? ''
+  });
+
+  return { ok: true };
+}
+
+export function updateProductionPlanItem(user: CurrentUser, itemId: string, input: UpdateProductionPlanItemInput) {
+  const current = getProductionPlanItemForEdit(itemId);
+  assertCanReadCase(user, current.project_case_id);
+  assertCanEditProductionPlanDepartment(user, current.department_id);
+  const nextStart = input.planned_start_date ?? current.planned_start_date;
+  const nextEnd = input.planned_end_date ?? current.planned_end_date;
+  validateScheduleDates(nextStart, nextEnd);
+  const nextProgress = input.progress === undefined ? current.progress : normalizePlanProgress(input.progress);
+  const nextStatus = input.status ?? productionPlanStatusFromProgress(nextProgress, current.status);
+
+  db.prepare(
+    `UPDATE production_plan_item
+     SET name = @name,
+         planned_start_date = @planned_start_date,
+         planned_end_date = @planned_end_date,
+         assigned_team_id = @assigned_team_id,
+         progress = @progress,
+         status = @status,
+         remark = @remark
+     WHERE id = @id`
+  ).run({
+    id: itemId,
+    name: input.name?.trim() || current.name,
+    planned_start_date: nextStart,
+    planned_end_date: nextEnd,
+    assigned_team_id: input.assigned_team_id === undefined ? current.assigned_team_id : input.assigned_team_id,
+    progress: nextProgress,
+    status: nextStatus,
+    remark: input.remark === undefined ? current.remark ?? '' : input.remark
+  });
+
+  return { ok: true };
+}
+
+export function deleteProductionPlanItem(user: CurrentUser, itemId: string) {
+  const current = getProductionPlanItemForEdit(itemId);
+  assertCanReadCase(user, current.project_case_id);
+  assertCanEditProductionPlanDepartment(user, current.department_id);
+  db.prepare('DELETE FROM production_plan_item WHERE id = ?').run(itemId);
+  return { ok: true };
+}
+
+function getProductionPlanBacklog(user: CurrentUser, plan: ProductionPlanRow, filters: ProductionPlanFilters) {
+  const where = [
+    't.owner_department_id = ?',
+    "t.status != 'completed'",
+    `NOT EXISTS (
+       SELECT 1 FROM production_plan_item ppi
+       WHERE ppi.production_plan_id = ?
+         AND ppi.case_task_id = t.id
+     )`
+  ];
+  const params: unknown[] = [plan.department_id, plan.id];
+  if (filters.project_case_id) {
+    where.push('t.project_case_id = ?');
+    params.push(filters.project_case_id);
+  }
+  if (filters.team_id) {
+    where.push('t.team_id = ?');
+    params.push(filters.team_id);
+  }
+  if (!canManageProjects(user)) {
+    const employee = db.prepare('SELECT department_id FROM employee WHERE id = ?').get(user.id) as { department_id: string | null } | undefined;
+    where.push(
+      `(t.project_case_id IN (
+          SELECT project_case_id FROM project_case_member WHERE user_id = ?
+        )
+        OR t.assignee_id = ?
+        OR t.team_id IN (SELECT id FROM team WHERE leader_id = ?)
+        OR t.owner_department_id = ?)`
+    );
+    params.push(user.id, user.id, user.id, employee?.department_id ?? '');
+  }
+
+  return db
+    .prepare(
+      `SELECT t.id as task_id, t.project_case_id, pc.name as project_case_name,
+              t.case_item_id, ci.name as case_item_name, t.task_type, t.name as task_name,
+              t.owner_department_id, d.name as owner_department_name,
+              t.assignee_id, emp.name as assignee_name, t.team_id, tm.name as team_name,
+              t.progress, t.status,
+              (SELECT COUNT(*) FROM exception_record ex
+               WHERE ex.case_task_id = t.id AND ex.status NOT IN ('resolved', 'closed', 'cancelled')) as open_exception_count
+       FROM case_task t
+       JOIN project_case pc ON pc.id = t.project_case_id
+       LEFT JOIN case_item ci ON ci.id = t.case_item_id
+       LEFT JOIN department d ON d.id = t.owner_department_id
+       LEFT JOIN employee emp ON emp.id = t.assignee_id
+       LEFT JOIN team tm ON tm.id = t.team_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY pc.source_seq, ci.source_row, t.owner_department_id, t.task_type
+       LIMIT 120`
+    )
+    .all(...params) as ProductionPlanBacklogRow[];
 }
 
 function enumerateDates(startDate: string, endDate: string) {
@@ -1298,4 +1488,168 @@ function daysBetween(startDate: string, endDate: string) {
 function productionPlanStatus(item: ProductionPlanItemRow) {
   if (Number(item.progress ?? 0) >= 100 || item.status === 'completed') return 'completed';
   return item.status || 'planned';
+}
+
+function getSchedulableTask(taskId: string) {
+  const task = db
+    .prepare(
+      `SELECT t.id as task_id, t.project_case_id, pc.name as project_case_name,
+              t.case_item_id, ci.name as case_item_name, t.task_type, t.name as task_name,
+              t.owner_department_id, t.team_id, t.progress, t.status
+       FROM case_task t
+       JOIN project_case pc ON pc.id = t.project_case_id
+       LEFT JOIN case_item ci ON ci.id = t.case_item_id
+       WHERE t.id = ?`
+    )
+    .get(taskId) as
+    | {
+        task_id: string;
+        project_case_id: string;
+        project_case_name: string;
+        case_item_id: string | null;
+        case_item_name: string | null;
+        task_type: string;
+        task_name: string;
+        owner_department_id: string;
+        team_id: string | null;
+        progress: number;
+        status: string;
+      }
+    | undefined;
+  if (!task) {
+    const err = new Error('待排期任务不存在');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+  return task;
+}
+
+function getProductionPlanItemForEdit(itemId: string) {
+  const item = db
+    .prepare(
+      `SELECT ppi.*, pp.department_id
+       FROM production_plan_item ppi
+       JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       WHERE ppi.id = ?`
+    )
+    .get(itemId) as
+    | {
+        id: string;
+        department_id: string;
+        project_case_id: string;
+        case_item_id: string | null;
+        case_task_id: string | null;
+        name: string;
+        planned_start_date: string;
+        planned_end_date: string;
+        assigned_team_id: string | null;
+        progress: number;
+        status: string;
+        remark: string | null;
+      }
+    | undefined;
+  if (!item) {
+    const err = new Error('排期活动不存在');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+  return item;
+}
+
+function ensureProductionPlan(departmentId: string, month: string) {
+  const existing = db
+    .prepare(
+      `SELECT pp.*, d.name as department_name
+       FROM production_plan pp
+       JOIN department d ON d.id = pp.department_id
+       WHERE pp.department_id = ? AND pp.plan_month = ?
+       LIMIT 1`
+    )
+    .get(departmentId, month) as ProductionPlanRow | undefined;
+  if (existing) return existing;
+
+  const department = db.prepare('SELECT id, name FROM department WHERE id = ?').get(departmentId) as { id: string; name: string } | undefined;
+  if (!department) {
+    const err = new Error('部门不存在');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    const err = new Error('月份格式应为 YYYY-MM');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+  const startDate = `${month}-01`;
+  const start = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(start.getTime());
+  end.setUTCMonth(end.getUTCMonth() + 1);
+  end.setUTCDate(0);
+  const endDate = end.toISOString().slice(0, 10);
+  const id = `PP-${month.replace('-', '')}-${departmentId.replace(/^dept-/, '')}`;
+
+  db.prepare(
+    `INSERT INTO production_plan
+     (id, department_id, plan_month, name, status, start_date, end_date, source_sheet, created_at)
+     VALUES (@id, @department_id, @plan_month, @name, 'published', @start_date, @end_date, null, @created_at)
+     ON CONFLICT(id) DO NOTHING`
+  ).run({
+    id,
+    department_id: departmentId,
+    plan_month: month,
+    name: `${department.name} ${month} 排产`,
+    start_date: startDate,
+    end_date: endDate,
+    created_at: nowIso()
+  });
+
+  return db
+    .prepare(
+      `SELECT pp.*, d.name as department_name
+       FROM production_plan pp
+       JOIN department d ON d.id = pp.department_id
+       WHERE pp.id = ?`
+    )
+    .get(id) as ProductionPlanRow;
+}
+
+function assertCanEditProductionPlanDepartment(user: CurrentUser, departmentId: string) {
+  if (canManageProjects(user)) return;
+  if (user.permission_level !== 'editor') {
+    const err = new Error('当前用户不能编辑生产排期');
+    err.name = 'PERMISSION_DENIED';
+    throw err;
+  }
+  const employee = db.prepare('SELECT department_id FROM employee WHERE id = ?').get(user.id) as { department_id: string | null } | undefined;
+  if (employee?.department_id === departmentId) return;
+  const err = new Error('当前用户不能编辑其他部门的生产排期');
+  err.name = 'PERMISSION_DENIED';
+  throw err;
+}
+
+function validateScheduleDates(startDate: string, endDate: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    const err = new Error('排期日期格式应为 YYYY-MM-DD');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+  if (endDate < startDate) {
+    const err = new Error('结束日期不能早于开始日期');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+}
+
+function normalizePlanProgress(progress: number) {
+  if (!Number.isFinite(progress) || progress < 0 || progress > 100) {
+    const err = new Error('完成度必须在 0 到 100 之间');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+  return Math.round(progress);
+}
+
+function productionPlanStatusFromProgress(progress: number, fallback: string) {
+  if (progress >= 100) return 'completed';
+  if (progress > 0) return 'in_progress';
+  return fallback === 'completed' ? 'planned' : fallback;
 }

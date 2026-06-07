@@ -6,7 +6,9 @@ import { db, initializeDatabase, makeId, nowIso } from './db.js';
 import {
   assertCanReadCase,
   canManageProjects,
+  createProductionPlanItem,
   createProjectCase,
+  deleteProductionPlanItem,
   deleteProjectCase,
   getAllMatrix,
   getCurrentUser,
@@ -14,6 +16,7 @@ import {
   getProductionPlanBoard,
   getProjectCaseManageProfile,
   getTaskDetails,
+  updateProductionPlanItem,
   updateProgress,
   updateProjectCase
 } from './services.js';
@@ -203,6 +206,47 @@ app.get('/api/production-plans/board', async (request) => {
     team_id: z.string().optional()
   }).parse(request.query);
   return getProductionPlanBoard(user, query);
+});
+
+const productionPlanItemCreateBody = z.object({
+  department_id: z.string().optional(),
+  month: z.string().optional(),
+  case_task_id: z.string(),
+  name: z.string().trim().optional(),
+  planned_start_date: z.string(),
+  planned_end_date: z.string(),
+  assigned_team_id: z.string().nullable().optional(),
+  progress: z.number().min(0).max(100).optional(),
+  remark: z.string().optional()
+});
+
+app.post('/api/production-plans/items', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const body = productionPlanItemCreateBody.parse(request.body);
+  return createProductionPlanItem(user, body);
+});
+
+const productionPlanItemUpdateBody = z.object({
+  name: z.string().trim().optional(),
+  planned_start_date: z.string().optional(),
+  planned_end_date: z.string().optional(),
+  assigned_team_id: z.string().nullable().optional(),
+  progress: z.number().min(0).max(100).optional(),
+  status: z.string().optional(),
+  remark: z.string().optional()
+});
+
+app.patch('/api/production-plans/items/:id', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const body = productionPlanItemUpdateBody.parse(request.body);
+  return updateProductionPlanItem(user, id, body);
+});
+
+app.delete('/api/production-plans/items/:id', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  return deleteProductionPlanItem(user, id);
 });
 
 app.get('/api/tasks/:id', async (request) => {

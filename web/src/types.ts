@@ -277,15 +277,36 @@ export type ProductionPlanItem = {
   remark?: string | null;
 };
 
+export type ProductionPlanBacklogItem = {
+  task_id: string;
+  project_case_id: string;
+  project_case_name: string;
+  case_item_id?: string | null;
+  case_item_name?: string | null;
+  task_type: string;
+  task_name: string;
+  owner_department_id: string;
+  owner_department_name?: string | null;
+  assignee_id?: string | null;
+  assignee_name?: string | null;
+  team_id?: string | null;
+  team_name?: string | null;
+  progress: number;
+  status: string;
+  open_exception_count: number;
+};
+
 export type ProductionPlanBoardResponse = {
   plan: ProductionPlan | null;
   dates: string[];
   items: ProductionPlanItem[];
+  backlog_items: ProductionPlanBacklogItem[];
   summary: {
     item_count: number;
     linked_project_count: number;
     scheduled_days: number;
     completed_count: number;
+    backlog_count: number;
   };
   filters: {
     departments: Array<{ id: string; name: string }>;
