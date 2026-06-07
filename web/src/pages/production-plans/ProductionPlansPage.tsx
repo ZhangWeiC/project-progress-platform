@@ -53,6 +53,7 @@ type ScheduleFormValues = {
 export function ProductionPlansPage() {
   const [filters, setFilters] = useState<ProductionPlanBoardFilters>({});
   const [keyword, setKeyword] = useState('');
+  const [backlogOpen, setBacklogOpen] = useState(false);
   const [scheduleForm] = Form.useForm<ScheduleFormValues>();
   const [selectedBacklog, setSelectedBacklog] = useState<ProductionPlanBacklogItem | null>(null);
   const [editingItem, setEditingItem] = useState<ProductionPlanItem | null>(null);
@@ -113,6 +114,7 @@ export function ProductionPlansPage() {
 
   const openCreateSchedule = (backlog: ProductionPlanBacklogItem) => {
     const dates = defaultScheduleDates(plan?.start_date);
+    setBacklogOpen(false);
     setEditingItem(null);
     setSelectedBacklog(backlog);
     scheduleForm.setFieldsValue({
@@ -227,6 +229,9 @@ export function ProductionPlansPage() {
             <Button icon={<ReloadOutlined />} onClick={() => boardQuery.refetch()}>
               刷新
             </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setBacklogOpen(true)}>
+              待排期任务池 {board?.summary.backlog_count ?? 0}
+            </Button>
           </Space>
         </div>
       </Card>
@@ -238,100 +243,65 @@ export function ProductionPlansPage() {
         <Col xs={12} lg={6}><Card size="small"><Statistic title="已完成" value={board?.summary.completed_count ?? 0} /></Card></Col>
       </Row>
 
-      <Row gutter={12} align="top">
-        <Col xs={24} xl={7}>
-          <Card
-            className="schedule-backlog-card"
-            title="待排期任务池"
-            extra={<Tag color="blue">{filteredBacklog.length}</Tag>}
-          >
-            <Input
-              allowClear
-              prefix={<SearchOutlined />}
-              placeholder="搜索项目 / 子项目 / 阶段 / 负责人"
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-              style={{ marginBottom: 10 }}
-            />
-            <Table<ProductionPlanBacklogItem>
-              rowKey="task_id"
-              size="small"
-              loading={boardQuery.isLoading}
-              dataSource={filteredBacklog}
-              pagination={{ pageSize: 10, showSizeChanger: false }}
-              columns={[
-                {
-                  title: '任务',
-                  key: 'task',
-                  render: (_value, row) => (
-                    <Space direction="vertical" size={0} className="schedule-backlog-item">
-                      <Tooltip title={row.project_case_name}>
-                        <Typography.Text strong className="matrix-ellipsis-text">{row.project_case_name}</Typography.Text>
-                      </Tooltip>
-                      <Tooltip title={`${row.case_item_name ?? '-'} / ${row.task_name}`}>
-                        <Typography.Text type="secondary" className="matrix-ellipsis-text">
-                          {row.case_item_name ?? '-'} / {row.task_name}
-                        </Typography.Text>
-                      </Tooltip>
-                      <Space size={4} wrap>
-                        <Tag>{row.owner_department_name ?? '部门'}</Tag>
-                        {row.team_name ? <Tag color="geekblue">{row.team_name}</Tag> : null}
-                        {row.open_exception_count > 0 ? <Tag color="red">{row.open_exception_count} 异常</Tag> : null}
-                      </Space>
-                    </Space>
-                  )
-                },
-                {
-                  title: '进度',
-                  dataIndex: 'progress',
-                  width: 74,
-                  align: 'center',
-                  render: (value) => `${Math.round(Number(value ?? 0))}%`
-                },
-                {
-                  title: '',
-                  key: 'action',
-                  width: 70,
-                  align: 'center',
-                  render: (_value, row) => (
-                    <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => openCreateSchedule(row)}>
-                      排期
-                    </Button>
-                  )
-                }
-              ]}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} xl={17}>
-          <Card
-            className="production-plan-card"
-            title="排期甘特图"
-            extra={
-              <Space size={4} wrap className="gantt-legend">
-                <Tag color="green">装焊</Tag>
-                <Tag color="cyan">下料</Tag>
-                <Tag color="purple">喷涂</Tag>
-                <Tag color="blue">发货</Tag>
-              </Space>
-            }
-          >
-            <Table<ProductionPlanItem>
-              rowKey="id"
-              loading={boardQuery.isLoading}
-              columns={ganttColumns}
-              dataSource={board?.items ?? []}
-              pagination={false}
-              size="small"
-              bordered
-              sticky
-              tableLayout="fixed"
-          scroll={{ x: scrollX, y: 'calc(100vh - 328px)' }}
-              rowClassName={(row) => `production-plan-row status-${row.effective_status}`}
-            />
-          </Card>
-        </Col>
-      </Row>
+      <Card
+        className="production-plan-card"
+        title="排期甘特图"
+        extra={
+          <Space size={4} wrap className="gantt-legend">
+            <Tag color="green">装焊</Tag>
+            <Tag color="cyan">下料</Tag>
+            <Tag color="purple">喷涂</Tag>
+            <Tag color="blue">发货</Tag>
+          </Space>
+        }
+      >
+        <Table<ProductionPlanItem>
+          rowKey="id"
+          loading={boardQuery.isLoading}
+          columns={ganttColumns}
+          dataSource={board?.items ?? []}
+          pagination={false}
+          size="small"
+          bordered
+          sticky
+          tableLayout="fixed"
+          scroll={{ x: scrollX, y: 'calc(100vh - 286px)' }}
+          rowClassName={(row) => `production-plan-row status-${row.effective_status}`}
+        />
+      </Card>
+
+      <Modal
+        title={
+          <Space>
+            <span>待排期任务池</span>
+            <Tag color="blue">{filteredBacklog.length}</Tag>
+          </Space>
+        }
+        open={backlogOpen}
+        width={1040}
+        footer={null}
+        onCancel={() => setBacklogOpen(false)}
+        destroyOnClose
+      >
+        <Input
+          allowClear
+          prefix={<SearchOutlined />}
+          placeholder="搜索项目 / 子项目 / 阶段 / 负责人"
+          value={keyword}
+          onChange={(event) => setKeyword(event.target.value)}
+          style={{ marginBottom: 10 }}
+        />
+        <Table<ProductionPlanBacklogItem>
+          rowKey="task_id"
+          className="schedule-backlog-modal-table"
+          size="small"
+          loading={boardQuery.isLoading}
+          dataSource={filteredBacklog}
+          pagination={{ pageSize: 8, showSizeChanger: false }}
+          scroll={{ y: '52vh' }}
+          columns={buildBacklogColumns(openCreateSchedule)}
+        />
+      </Modal>
 
       <Modal
         title={editingItem ? '编辑排期活动' : '新增排期活动'}
@@ -478,6 +448,71 @@ function buildGanttColumns(
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
         </Space>
+      )
+    }
+  ];
+}
+
+function buildBacklogColumns(onSchedule: (item: ProductionPlanBacklogItem) => void): ColumnsType<ProductionPlanBacklogItem> {
+  return [
+    {
+      title: '项目',
+      key: 'project',
+      width: 280,
+      render: (_value, row) => (
+        <Space direction="vertical" size={0} className="schedule-backlog-item">
+          <Tooltip title={row.project_case_name}>
+            <Typography.Text strong className="matrix-ellipsis-text">{row.project_case_name}</Typography.Text>
+          </Tooltip>
+          <Tooltip title={row.case_item_name ?? '-'}>
+            <Typography.Text type="secondary" className="matrix-ellipsis-text">
+              {row.case_item_name ?? '-'}
+            </Typography.Text>
+          </Tooltip>
+        </Space>
+      )
+    },
+    {
+      title: '阶段',
+      dataIndex: 'task_name',
+      width: 120,
+      render: (value: string) => <Tag color="geekblue">{value}</Tag>
+    },
+    {
+      title: '负责人 / 班组',
+      key: 'owner',
+      width: 170,
+      render: (_value, row) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text>{row.assignee_name ?? row.team_name ?? '-'}</Typography.Text>
+          <Typography.Text type="secondary" className="production-plan-meta">
+            {row.owner_department_name ?? '-'}
+          </Typography.Text>
+        </Space>
+      )
+    },
+    {
+      title: '当前进度',
+      dataIndex: 'progress',
+      width: 150,
+      render: (value: number) => <Progress percent={Math.round(Number(value ?? 0))} size="small" />
+    },
+    {
+      title: '异常',
+      dataIndex: 'open_exception_count',
+      width: 80,
+      align: 'center',
+      render: (value: number) => value > 0 ? <Tag color="red">{value}</Tag> : <Typography.Text type="secondary">0</Typography.Text>
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 90,
+      align: 'center',
+      render: (_value, row) => (
+        <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => onSchedule(row)}>
+          排期
+        </Button>
       )
     }
   ];
