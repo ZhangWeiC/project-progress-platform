@@ -206,12 +206,21 @@ export type ProjectCaseInput = {
 export type ProjectCaseItemInput = {
   id?: string | null;
   name: string;
+  delivery_date?: string | null;
+  delivery_status?: string | null;
 };
 
 export type ProjectCaseStageOwnerInput = {
   task_type: string;
   assignee_id?: string | null;
   team_id?: string | null;
+};
+
+export type DeliveryInfoInput = {
+  project_case_id: string;
+  case_item_id?: string | null;
+  delivery_date?: string | null;
+  delivery_status?: string | null;
 };
 
 export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
@@ -342,6 +351,31 @@ export function deleteProjectCase(projectCaseId: string, user: CurrentUser) {
   return { ok: true };
 }
 
+export function updateDeliveryInfo(input: DeliveryInfoInput, user: CurrentUser) {
+  assertCanManageProjects(user);
+  const deliveryDate = normalizeText(input.delivery_date);
+  const deliveryStatus = normalizeText(input.delivery_status);
+  if (input.case_item_id) {
+    const item = db.prepare('SELECT id FROM case_item WHERE id = ? AND project_case_id = ?').get(input.case_item_id, input.project_case_id);
+    if (!item) {
+      const err = new Error('子项目不存在或不属于当前项目');
+      err.name = 'NOT_FOUND';
+      throw err;
+    }
+    db.prepare('UPDATE case_item SET delivery_date = ?, delivery_status = ? WHERE id = ?').run(deliveryDate, deliveryStatus, input.case_item_id);
+    return { ok: true };
+  }
+
+  const project = db.prepare('SELECT id FROM project_case WHERE id = ?').get(input.project_case_id);
+  if (!project) {
+    const err = new Error('项目不存在');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+  db.prepare('UPDATE project_case SET delivery_date = ?, delivery_status = ? WHERE id = ?').run(deliveryDate, deliveryStatus, input.project_case_id);
+  return { ok: true };
+}
+
 export function getProjectCaseManageProfile(projectCaseId: string, user: CurrentUser) {
   assertCanManageProjects(user);
   const project = db.prepare(
@@ -357,7 +391,7 @@ export function getProjectCaseManageProfile(projectCaseId: string, user: Current
     throw err;
   }
   const items = db
-    .prepare('SELECT id, name, progress, status, source_row FROM case_item WHERE project_case_id = ? ORDER BY source_row, id')
+    .prepare('SELECT id, name, progress, status, delivery_date, delivery_status, source_row FROM case_item WHERE project_case_id = ? ORDER BY source_row, id')
     .all(projectCaseId);
   return {
     ...project,
@@ -443,7 +477,21 @@ function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | un
         err.name = 'VALIDATION_ERROR';
         throw err;
       }
-      db.prepare('UPDATE case_item SET name = ? WHERE id = ?').run(name, item.id);
+      const existingItem = db.prepare('SELECT delivery_date, delivery_status FROM case_item WHERE id = ?').get(item.id) as
+        | { delivery_date: string | null; delivery_status: string | null }
+        | undefined;
+      db.prepare(
+        `UPDATE case_item
+         SET name = ?,
+             delivery_date = ?,
+             delivery_status = ?
+         WHERE id = ?`
+      ).run(
+        name,
+        normalizeText(item.delivery_date === undefined ? existingItem?.delivery_date : item.delivery_date),
+        normalizeText(item.delivery_status === undefined ? existingItem?.delivery_status : item.delivery_status),
+        item.id
+      );
       ensureItemTasks(projectCaseId, item.id, stageOwners);
       continue;
     }
@@ -453,8 +501,15 @@ function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | un
     db.prepare(
       `INSERT INTO case_item
        (id, project_case_id, name, category, quantity, quantity_unit, piece_count, weight, weight_unit, status, progress, delivery_date, delivery_status, source_row)
-       VALUES (?, ?, ?, '', null, null, null, null, 'T', 'not_started', 0, null, '', ?)`
-    ).run(itemId, projectCaseId, name, nextRow);
+       VALUES (?, ?, ?, '', null, null, null, null, 'T', 'not_started', 0, ?, ?, ?)`
+    ).run(
+      itemId,
+      projectCaseId,
+      name,
+      normalizeText(item.delivery_date),
+      normalizeText(item.delivery_status),
+      nextRow
+    );
     ensureItemTasks(projectCaseId, itemId, stageOwners);
   }
 }

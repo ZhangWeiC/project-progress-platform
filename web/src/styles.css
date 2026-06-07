@@ -320,11 +320,39 @@ body {
   grid-column: 1 / -1;
 }
 
+.project-item-header {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 132px 180px 28px;
+  gap: 8px;
+  padding-right: 2px;
+}
+
 .project-item-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 132px 180px 28px;
   align-items: flex-start;
   gap: 8px;
   width: 100%;
+}
+
+.project-item-row .ant-form-item {
+  min-width: 0;
+}
+
+.matrix-editable-text-cell {
+  width: 100%;
+  min-height: 24px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.matrix-editable-text-cell:hover {
+  background: rgba(22, 119, 255, 0.08);
 }
 
 .project-stage-owner-grid {
@@ -696,6 +724,8 @@ body {
   }
 
   .project-form-grid,
+  .project-item-header,
+  .project-item-row,
   .project-stage-owner-grid {
     grid-template-columns: 1fr;
   }

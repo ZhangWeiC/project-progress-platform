@@ -13,7 +13,7 @@ export type ProjectCasePayload = {
   estimated_weight?: number | null;
   delivery_date?: string | null;
   delivery_status?: string | null;
-  items?: Array<{ id?: string | null; name: string }>;
+  items?: Array<{ id?: string | null; name: string; delivery_date?: string | null; delivery_status?: string | null }>;
   stage_owners?: Array<{ task_type: string; assignee_id?: string | null; team_id?: string | null }>;
 };
 
@@ -25,6 +25,16 @@ export const fetchProjectCaseManageProfile = (caseId: string) =>
 
 export const updateProjectCase = (caseId: string, payload: ProjectCasePayload) =>
   apiPatch<ProjectCase>(`/api/cases/${caseId}`, payload);
+
+export type DeliveryInfoPayload = {
+  project_case_id: string;
+  case_item_id?: string | null;
+  delivery_date?: string | null;
+  delivery_status?: string | null;
+};
+
+export const updateDeliveryInfo = (payload: DeliveryInfoPayload) =>
+  apiPatch<{ ok: boolean }>('/api/delivery-info', payload);
 
 export const deleteProjectCase = (caseId: string) =>
   apiDelete<{ ok: boolean }>(`/api/cases/${caseId}`);
