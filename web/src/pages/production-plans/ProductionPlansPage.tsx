@@ -260,7 +260,6 @@ export function ProductionPlansPage() {
             <Tag color="green">装焊</Tag>
             <Tag color="cyan">下料</Tag>
             <Tag color="purple">喷涂</Tag>
-            <Tag color="blue">发货</Tag>
           </Space>
         }
       >

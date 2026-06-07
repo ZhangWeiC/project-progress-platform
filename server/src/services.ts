@@ -748,6 +748,7 @@ type MatrixProject = {
   name: string;
   status: string;
   total_progress: number;
+  delivery_date: string | null;
   delivery_status: string | null;
   business_owner_name: string | null;
   design_owner_name: string | null;
@@ -760,6 +761,7 @@ type MatrixItem = {
   name: string;
   progress: number;
   status: string;
+  delivery_date: string | null;
   delivery_status: string | null;
   open_exception_count: number;
 };
@@ -863,6 +865,7 @@ function getMatrixTemplateColumns() {
        FROM task_template tt
        JOIN subtask_template st ON st.task_template_id = tt.id
        WHERE st.id != 'st-design-confirm'
+         AND tt.task_type != 'delivery'
        ORDER BY tt.sort_order, st.sort_order`
     )
     .all() as MatrixTemplateColumn[];
@@ -879,7 +882,8 @@ function buildMatrixColumns(templates: MatrixTemplateColumn[]) {
       taskType: column.task_type,
       groupIndex: index
     })),
-    { key: 'delivery_status', title: '发货情况', frozen: 'right' },
+    { key: 'delivery_date', title: '发货时间', group: '发货' },
+    { key: 'delivery_status', title: '发货情况', group: '发货' },
     { key: 'open_exception_count', title: '异常', frozen: 'right' }
   ];
 }
@@ -909,6 +913,7 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
       value: `${children.length} 个子项目`,
       status: project.status
     },
+    delivery_date: { value: project.delivery_date ?? '' },
     delivery_status: { value: project.delivery_status ?? '' },
     open_exception_count: { value: project.open_exception_count }
   };
@@ -952,6 +957,7 @@ function buildItemMatrixRow(project: MatrixProject, item: MatrixItem, caseTasks:
   const cells: Record<string, MatrixCell> = {
     case_name: { value: '', ownerName: businessOwnerLabel(project.business_owner_name) },
     case_item_name: { value: item.name, status: item.status, aggregateCount: Math.round(item.progress) },
+    delivery_date: { value: item.delivery_date ?? '' },
     delivery_status: { value: item.delivery_status ?? '' },
     open_exception_count: { value: item.open_exception_count }
   };
@@ -1042,7 +1048,14 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
        LEFT JOIN employee de ON de.id = pc.design_owner_id
        WHERE pc.id = ?`
     )
-    .get(projectCaseId) as { id: string; name: string; business_owner_name: string | null; design_owner_name: string | null } | undefined;
+    .get(projectCaseId) as {
+      id: string;
+      name: string;
+      delivery_date: string | null;
+      delivery_status: string | null;
+      business_owner_name: string | null;
+      design_owner_name: string | null;
+    } | undefined;
   if (!projectCase) {
     const err = new Error('项目不存在');
     err.name = 'NOT_FOUND';
@@ -1052,6 +1065,7 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
     id: string;
     name: string;
     progress: number;
+    delivery_date: string | null;
     delivery_status: string | null;
   }>;
   const subtaskTemplates = db
@@ -1061,6 +1075,7 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
        FROM task_template tt
        JOIN subtask_template st ON st.task_template_id = tt.id
        WHERE st.id != 'st-design-confirm'
+         AND tt.task_type != 'delivery'
        ORDER BY tt.sort_order, st.sort_order`
     )
     .all() as Array<{ task_type: string; task_name: string; generation_scope: string; subtask_template_id: string; subtask_name: string; sort_order: number }>;
@@ -1070,7 +1085,8 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
     { key: 'case_item_name', title: '子项目', frozen: true },
     { key: 'business_owner_name', title: '业务部负责人', frozen: true },
     { key: 'design_owner_name', title: '设计部负责人', frozen: true },
-    { key: 'delivery_status', title: '发货情况', frozen: true },
+    { key: 'delivery_date', title: '发货时间', group: '发货' },
+    { key: 'delivery_status', title: '发货情况', group: '发货' },
     { key: 'open_exception_count', title: '异常', frozen: true },
     ...subtaskTemplates.map((column) => ({
       key: `${column.task_type}.${column.subtask_template_id}`,
@@ -1092,6 +1108,7 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
       case_item_name: { value: item.name },
       business_owner_name: { value: projectCase.business_owner_name ?? '' },
       design_owner_name: { value: projectCase.design_owner_name ?? '' },
+      delivery_date: { value: item.delivery_date ?? '' },
       delivery_status: { value: item.delivery_status ?? '' }
     };
 
@@ -1104,6 +1121,7 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
       const subtasks = db.prepare('SELECT * FROM case_subtask WHERE case_task_id = ?').all(task.id) as Array<{ id: string; subtask_template_id: string; progress: number; status: string }>;
       for (const subtask of subtasks) {
         const key = `${task.task_type}.${subtask.subtask_template_id}`;
+        if (!subtaskTemplates.some((template) => `${template.task_type}.${template.subtask_template_id}` === key)) continue;
         cells[key] = {
           value: subtask.progress,
           status: subtask.status,
