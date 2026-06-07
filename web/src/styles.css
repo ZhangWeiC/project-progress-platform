@@ -223,9 +223,32 @@ body {
 .progress-value {
   display: inline-block;
   min-width: 34px;
+  padding: 1px 5px;
+  border-radius: 4px;
   color: #111827;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+}
+
+.progress-value-completed {
+  color: #047857;
+  background: #dff7ea;
+}
+
+.progress-value-active {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.progress-value-empty {
+  color: #64748b;
+  background: #f1f5f9;
+}
+
+.progress-value-exception {
+  color: #b42318;
+  background: #fee4e2;
 }
 
 .progress-owner {
@@ -247,6 +270,10 @@ body {
 .muted-icon {
   color: #9ca3af;
   font-size: 11px;
+}
+
+.progress-warning {
+  color: #b42318;
 }
 
 .form-grid {

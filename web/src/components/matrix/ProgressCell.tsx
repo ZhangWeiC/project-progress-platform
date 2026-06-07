@@ -14,6 +14,7 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
   const isAggregate = !cell.targetId;
   const owner = cell.ownerMerged ? '' : cell.ownerName;
   const formattedValue = value === null ? null : `${Math.round(value)}%`;
+  const valueClassName = `progress-value ${progressValueClassName(cell, value)}`;
 
   if (cell.targetId && cell.taskId) {
     return (
@@ -24,7 +25,7 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
         onClick={() => onOpenTask?.(cell.taskId!)}
       >
         <Space size={4}>
-          {formattedValue === null ? <span className="empty-cell">-</span> : <span className="progress-value">{formattedValue}</span>}
+          {formattedValue === null ? <span className="empty-cell">-</span> : <span className={valueClassName}>{formattedValue}</span>}
           {!editable && (
             <Tooltip title="当前用户不可编辑">
               <LockOutlined className="muted-icon" />
@@ -39,18 +40,18 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
   if (isAggregate && value !== null) {
     return (
       <div className="progress-cell-summary">
-        <span className="progress-value">{formattedValue}</span>
+        <span className={valueClassName}>{formattedValue}</span>
         {owner && <span className="progress-owner">{owner}</span>}
       </div>
     );
   }
 
   if (cell.value === 0 && cell.status === 'exception') {
-    return <WarningOutlined />;
+    return <WarningOutlined className="progress-warning" />;
   }
 
   if (typeof cell.value === 'number') {
-    return <span>{formattedValue}</span>;
+    return <span className={valueClassName}>{formattedValue}</span>;
   }
 
   if (cell.value === null || cell.value === '') {
@@ -58,4 +59,12 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
   }
 
   return <span>{String(cell.value)}</span>;
+}
+
+function progressValueClassName(cell: MatrixCell, value: number | null) {
+  if (cell.status === 'exception') return 'progress-value-exception';
+  if (value === null) return '';
+  if (value >= 100) return 'progress-value-completed';
+  if (value > 0) return 'progress-value-active';
+  return 'progress-value-empty';
 }
