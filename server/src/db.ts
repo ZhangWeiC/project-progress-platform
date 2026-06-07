@@ -1,7 +1,9 @@
 import Database from 'better-sqlite3';
 import { randomBytes, scryptSync } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+
+loadDotEnv();
 
 const dataDir = path.resolve(process.env.DATA_DIR ?? path.join(process.cwd(), 'server/data'));
 mkdirSync(dataDir, { recursive: true });
@@ -10,13 +12,36 @@ export const db = new Database(path.join(dataDir, 'app.db'));
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+
+function loadDotEnv() {
+  const envPath = path.resolve(process.cwd(), '.env');
+  if (!existsSync(envPath)) return;
+  const lines = readFileSync(envPath, 'utf8').split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const separatorIndex = trimmed.indexOf('=');
+    if (separatorIndex <= 0) continue;
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const rawValue = trimmed.slice(separatorIndex + 1).trim();
+    if (!key || process.env[key] !== undefined) continue;
+    process.env[key] = rawValue.replace(/^['"]|['"]$/g, '');
+  }
+}
+
 export type TargetType = 'task' | 'subtask';
 
 export function initializeDatabase() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS department (
       id TEXT PRIMARY KEY,
-      name TEXT NOT NULL
+      name TEXT NOT NULL,
+      parent_department_id TEXT,
+      feishu_department_id TEXT,
+      feishu_open_department_id TEXT,
+      leader_user_id TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      last_feishu_sync_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS employee (
@@ -24,6 +49,25 @@ export function initializeDatabase() {
       name TEXT NOT NULL,
       department_id TEXT,
       role TEXT NOT NULL,
+      feishu_open_id TEXT,
+      feishu_union_id TEXT,
+      feishu_user_id TEXT,
+      email TEXT,
+      mobile TEXT,
+      avatar_url TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      last_feishu_sync_at TEXT,
+      FOREIGN KEY (department_id) REFERENCES department(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS employee_department (
+      employee_id TEXT NOT NULL,
+      department_id TEXT NOT NULL,
+      is_primary INTEGER NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'feishu',
+      last_feishu_sync_at TEXT,
+      PRIMARY KEY (employee_id, department_id),
+      FOREIGN KEY (employee_id) REFERENCES employee(id),
       FOREIGN KEY (department_id) REFERENCES department(id)
     );
 
@@ -297,8 +341,10 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_work_log_task ON work_log_entry(case_task_id);
     CREATE INDEX IF NOT EXISTS idx_exception_task ON exception_record(case_task_id);
     CREATE INDEX IF NOT EXISTS idx_auth_session_employee ON auth_session(employee_id);
+    CREATE INDEX IF NOT EXISTS idx_employee_department_department ON employee_department(department_id);
   `);
 
+  migrateFeishuIdentityColumns();
   seedDatabase();
   seedCredentials();
   migrateWorkflowModel();
@@ -314,6 +360,38 @@ function insertMany(table: string, rows: Array<Record<string, unknown>>) {
   });
   tx(rows);
 }
+
+function migrateFeishuIdentityColumns() {
+  addColumnIfMissing('department', 'parent_department_id', 'TEXT');
+  addColumnIfMissing('department', 'feishu_department_id', 'TEXT');
+  addColumnIfMissing('department', 'feishu_open_department_id', 'TEXT');
+  addColumnIfMissing('department', 'leader_user_id', 'TEXT');
+  addColumnIfMissing('department', 'status', "TEXT NOT NULL DEFAULT 'active'");
+  addColumnIfMissing('department', 'last_feishu_sync_at', 'TEXT');
+
+  addColumnIfMissing('employee', 'feishu_open_id', 'TEXT');
+  addColumnIfMissing('employee', 'feishu_union_id', 'TEXT');
+  addColumnIfMissing('employee', 'feishu_user_id', 'TEXT');
+  addColumnIfMissing('employee', 'email', 'TEXT');
+  addColumnIfMissing('employee', 'mobile', 'TEXT');
+  addColumnIfMissing('employee', 'avatar_url', 'TEXT');
+  addColumnIfMissing('employee', 'is_active', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnIfMissing('employee', 'last_feishu_sync_at', 'TEXT');
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_employee_feishu_open_id ON employee(feishu_open_id);
+    CREATE INDEX IF NOT EXISTS idx_employee_feishu_union_id ON employee(feishu_union_id);
+    CREATE INDEX IF NOT EXISTS idx_employee_feishu_user_id ON employee(feishu_user_id);
+    CREATE INDEX IF NOT EXISTS idx_department_feishu_open_id ON department(feishu_open_department_id);
+  `);
+}
+
+function addColumnIfMissing(table: string, column: string, definition: string) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (columns.some((item) => item.name === column)) return;
+  db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+}
+
 
 function seedDatabase() {
   const existing = db.prepare('SELECT COUNT(*) as count FROM project_case').get() as { count: number };
