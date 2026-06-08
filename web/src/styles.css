@@ -385,6 +385,14 @@ body {
   min-width: 0;
 }
 
+.production-plan-clickable-cell {
+  cursor: pointer;
+}
+
+.production-plan-clickable-cell:hover .ant-typography {
+  color: #1677ff;
+}
+
 .production-plan-meta {
   display: block;
   font-size: 11px;
@@ -576,16 +584,26 @@ body {
 .gantt-bar-label {
   position: relative;
   display: block;
-  padding: 0 42px 0 9px;
+  padding: 0 68px 0 9px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .gantt-bar-progress {
   position: absolute;
-  top: 0;
+  top: 2px;
   right: 7px;
   font-size: 11px;
+  line-height: 10px;
+  opacity: 0.9;
+}
+
+.gantt-bar-actual {
+  position: absolute;
+  top: 13px;
+  right: 7px;
+  font-size: 10px;
+  line-height: 10px;
   opacity: 0.9;
 }
 
@@ -651,10 +669,81 @@ body {
   vertical-align: top;
 }
 
+.production-analysis-card .ant-card-body {
+  padding: 8px 10px 10px;
+}
+
+.production-analysis-card .ant-tabs-nav {
+  margin-bottom: 8px;
+}
+
+.production-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.production-detail-grid div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #edf0f5;
+  border-radius: 6px;
+  background: #fafbfc;
+}
+
+.production-detail-grid span {
+  display: block;
+  margin-bottom: 4px;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.production-detail-grid strong {
+  display: block;
+  overflow: hidden;
+  color: #1f2937;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-summary-text {
+  padding: 2px 0;
+}
+
+.report-summary-text .ant-typography {
+  color: #1f2937;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.report-table-card .ant-card-body {
+  padding: 8px 10px 10px;
+}
+
+.report-table-card .ant-tabs-nav {
+  margin-bottom: 8px;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(160px, 1fr));
   gap: 0 16px;
+}
+
+.work-log-form-grid {
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+}
+
+.work-log-plan-title {
+  width: 100%;
+  min-width: 0;
+}
+
+.work-log-schedule-name {
+  display: inline-block;
+  max-width: 96px;
+  vertical-align: bottom;
 }
 
 .mobile-shell {

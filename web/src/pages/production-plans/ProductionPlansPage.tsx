@@ -1,11 +1,12 @@
 import {
   DeleteOutlined,
   EditOutlined,
+  EyeOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined
 } from '@ant-design/icons';
-import { Button, Card, Col, DatePicker, Form, Input, InputNumber, Modal, Popconfirm, Progress, Row, Select, Space, Statistic, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Col, DatePicker, Drawer, Empty, Form, Input, InputNumber, Modal, Popconfirm, Progress, Row, Select, Space, Statistic, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -15,10 +16,11 @@ import {
   createProductionPlanItem,
   deleteProductionPlanItem,
   fetchProductionPlanBoard,
+  fetchProductionPlanItemDetails,
   updateProductionPlanItem
 } from '../../services/productionPlans';
 import type { ProductionPlanBoardFilters } from '../../services/productionPlans';
-import type { ProductionPlanBacklogItem, ProductionPlanItem } from '../../types';
+import type { ProductionPlanAnalysis, ProductionPlanDailyActual, ProductionPlanEmployeeActual, ProductionPlanItem, ProductionPlanItemDetails, ProductionPlanBacklogItem, WorkLogEntry } from '../../types';
 
 const STATUS_LABELS: Record<string, string> = {
   planned: '计划中',
@@ -56,6 +58,7 @@ export function ProductionPlansPage() {
   const [scheduleForm] = Form.useForm<ScheduleFormValues>();
   const [selectedBacklog, setSelectedBacklog] = useState<ProductionPlanBacklogItem | null>(null);
   const [editingItem, setEditingItem] = useState<ProductionPlanItem | null>(null);
+  const [detailItemId, setDetailItemId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const boardQuery = useQuery({
@@ -64,6 +67,11 @@ export function ProductionPlansPage() {
   });
   const board = boardQuery.data;
   const plan = board?.plan;
+  const detailQuery = useQuery({
+    queryKey: ['production-plan-item-details', detailItemId],
+    queryFn: () => fetchProductionPlanItemDetails(detailItemId as string),
+    enabled: Boolean(detailItemId)
+  });
   const dateRangeValue = filters.start_date && filters.end_date
     ? [dayjs(filters.start_date), dayjs(filters.end_date)] as [Dayjs, Dayjs]
     : undefined;
@@ -149,6 +157,10 @@ export function ProductionPlansPage() {
     scheduleForm.resetFields();
   };
 
+  const openDetail = (item: ProductionPlanItem) => {
+    setDetailItemId(item.id);
+  };
+
   const submitSchedule = (values: ScheduleFormValues) => {
     const [start, end] = values.dates;
     const payload = {
@@ -173,11 +185,11 @@ export function ProductionPlansPage() {
   };
 
   const ganttColumns = useMemo(
-    () => buildGanttColumns(board?.dates ?? [], openEditSchedule, (item) => deleteMutation.mutate(item.id)),
+    () => buildGanttColumns(board?.dates ?? [], openDetail, openEditSchedule, (item) => deleteMutation.mutate(item.id)),
     [board?.dates, deleteMutation]
   );
   const timelineWidth = Math.max((board?.dates.length ?? 0) * GANTT_DAY_WIDTH, 320);
-  const scrollX = 52 + 280 + timelineWidth + 390;
+  const scrollX = 52 + 280 + timelineWidth + 560;
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -246,11 +258,18 @@ export function ProductionPlansPage() {
       </Card>
 
       <Row gutter={12}>
-        <Col xs={12} lg={6}><Card size="small"><Statistic title="待排期" value={board?.summary.backlog_count ?? 0} /></Card></Col>
-        <Col xs={12} lg={6}><Card size="small"><Statistic title="已排期" value={board?.summary.item_count ?? 0} /></Card></Col>
-        <Col xs={12} lg={6}><Card size="small"><Statistic title="排产天数" value={board?.summary.scheduled_days ?? 0} /></Card></Col>
-        <Col xs={12} lg={6}><Card size="small"><Statistic title="已完成" value={board?.summary.completed_count ?? 0} /></Card></Col>
+        <Col xs={12} lg={4}><Card size="small"><Statistic title="待排期" value={board?.summary.backlog_count ?? 0} /></Card></Col>
+        <Col xs={12} lg={4}><Card size="small"><Statistic title="已排期" value={board?.summary.item_count ?? 0} /></Card></Col>
+        <Col xs={12} lg={4}><Card size="small"><Statistic title="排产天数" value={board?.summary.scheduled_days ?? 0} /></Card></Col>
+        <Col xs={12} lg={4}><Card size="small"><Statistic title="实际工时" value={board?.summary.actual_hours ?? 0} suffix="h" /></Card></Col>
+        <Col xs={12} lg={4}><Card size="small"><Statistic title="已完成" value={board?.summary.completed_count ?? 0} /></Card></Col>
       </Row>
+
+      <ProductionPlanAnalysisPanel
+        analysis={board?.analysis}
+        loading={boardQuery.isLoading}
+        onOpenDetail={openDetail}
+      />
 
       <Card
         className="production-plan-card"
@@ -275,6 +294,7 @@ export function ProductionPlansPage() {
           tableLayout="fixed"
           scroll={{ x: scrollX, y: 'calc(100vh - 286px)' }}
           rowClassName={(row) => `production-plan-row status-${row.effective_status}`}
+          onRow={(row) => ({ onDoubleClick: () => openDetail(row) })}
         />
       </Card>
 
@@ -289,7 +309,7 @@ export function ProductionPlansPage() {
         width={1040}
         footer={null}
         onCancel={() => setBacklogOpen(false)}
-        destroyOnClose
+        destroyOnHidden
       >
         <Input
           allowClear
@@ -317,7 +337,7 @@ export function ProductionPlansPage() {
         onCancel={closeScheduleModal}
         onOk={() => scheduleForm.submit()}
         confirmLoading={createMutation.isPending || updateMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={scheduleForm} layout="vertical" onFinish={submitSchedule}>
           <Form.Item label="活动名称" name="name" rules={[{ required: true, message: '请输入活动名称' }]}>
@@ -335,20 +355,36 @@ export function ProductionPlansPage() {
               options={(board?.filters.teams ?? []).map((item) => ({ value: item.id, label: item.name }))}
             />
           </Form.Item>
-          <Form.Item label="完成度" name="progress">
-            <InputNumber min={0} max={100} addonAfter="%" style={{ width: '100%' }} />
+          <Form.Item label="完成度(%)" name="progress">
+            <InputNumber min={0} max={100} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item label="备注" name="remark">
             <Input.TextArea rows={3} placeholder="可记录排期说明、风险或现场备注" />
           </Form.Item>
         </Form>
       </Modal>
+
+      <Drawer
+        title="排期执行详情"
+        open={Boolean(detailItemId)}
+        width={920}
+        onClose={() => setDetailItemId(null)}
+      >
+        {detailQuery.isLoading ? (
+          <Table loading pagination={false} columns={[]} dataSource={[]} />
+        ) : detailQuery.data ? (
+          <ProductionPlanDetailContent data={detailQuery.data} />
+        ) : (
+          <Empty description="暂无详情" />
+        )}
+      </Drawer>
     </Space>
   );
 }
 
 function buildGanttColumns(
   dates: string[],
+  onOpenDetail: (item: ProductionPlanItem) => void,
   onEdit: (item: ProductionPlanItem) => void,
   onDelete: (item: ProductionPlanItem) => void
 ): ColumnsType<ProductionPlanItem> {
@@ -370,7 +406,7 @@ function buildGanttColumns(
       width: 280,
       render: (_value, row) => (
         <Tooltip title={<ScheduleDetail row={row} />} placement="right">
-          <Space direction="vertical" size={0} className="production-plan-title-cell">
+          <Space direction="vertical" size={0} className="production-plan-title-cell production-plan-clickable-cell" onClick={() => onOpenDetail(row)}>
             <Typography.Text strong className="matrix-ellipsis-text">{row.name}</Typography.Text>
             <Typography.Text type="secondary" className="matrix-ellipsis-text production-plan-meta">
               {compactScheduleSummary(row)}
@@ -405,6 +441,20 @@ function buildGanttColumns(
       render: (value: string | null) => value || '-'
     },
     {
+      title: '实际',
+      key: 'actual',
+      fixed: 'right',
+      width: 90,
+      render: (_value, row) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{formatPlanHours(row.actual_hours)}</Typography.Text>
+          <Typography.Text type="secondary" className="production-plan-meta">
+            {row.work_log_count ?? 0} 条
+          </Typography.Text>
+        </Space>
+      )
+    },
+    {
       title: '完成度',
       dataIndex: 'progress',
       key: 'progress',
@@ -424,10 +474,13 @@ function buildGanttColumns(
       title: '操作',
       key: 'action',
       fixed: 'right',
-      width: 96,
+      width: 126,
       align: 'center',
       render: (_value, row) => (
         <Space size={4}>
+          <Tooltip title="查看执行">
+            <Button size="small" icon={<EyeOutlined />} onClick={() => onOpenDetail(row)} />
+          </Tooltip>
           <Tooltip title="编辑排期">
             <Button size="small" icon={<EditOutlined />} onClick={() => onEdit(row)} />
           </Tooltip>
@@ -438,6 +491,282 @@ function buildGanttColumns(
       )
     }
   ];
+}
+
+function ProductionPlanAnalysisPanel({
+  analysis,
+  loading,
+  onOpenDetail
+}: {
+  analysis?: ProductionPlanAnalysis;
+  loading: boolean;
+  onOpenDetail: (item: ProductionPlanItem) => void;
+}) {
+  const summary = analysis?.summary;
+  return (
+    <Card
+      className="production-analysis-card"
+      title="执行偏差"
+      extra={
+        <Space size={4} wrap>
+          <Tag color={summary?.not_reported_count ? 'orange' : 'default'}>未报工 {summary?.not_reported_count ?? 0}</Tag>
+          <Tag color={summary?.outside_plan_count ? 'red' : 'default'}>超计划 {summary?.outside_plan_count ?? 0}</Tag>
+          <Tag color={summary?.unscheduled_count ? 'blue' : 'default'}>未排期 {summary?.unscheduled_count ?? 0}</Tag>
+        </Space>
+      }
+    >
+      <Tabs
+        size="small"
+        items={[
+          {
+            key: 'no-work',
+            label: '排了没报',
+            children: (
+              <Table<ProductionPlanItem>
+                rowKey="id"
+                size="small"
+                loading={loading}
+                dataSource={analysis?.no_work_plan_items ?? []}
+                columns={buildNoWorkPlanColumns(onOpenDetail)}
+                pagination={{ pageSize: 6, showSizeChanger: false }}
+              />
+            )
+          },
+          {
+            key: 'outside',
+            label: '超计划日报',
+            children: (
+              <Table<WorkLogEntry>
+                rowKey="id"
+                size="small"
+                loading={loading}
+                dataSource={analysis?.outside_plan_work_logs ?? []}
+                columns={buildWorkLogAnomalyColumns()}
+                pagination={{ pageSize: 6, showSizeChanger: false }}
+              />
+            )
+          },
+          {
+            key: 'unscheduled',
+            label: '未排期日报',
+            children: (
+              <Table<WorkLogEntry>
+                rowKey="id"
+                size="small"
+                loading={loading}
+                dataSource={analysis?.unscheduled_work_logs ?? []}
+                columns={buildWorkLogAnomalyColumns()}
+                pagination={{ pageSize: 6, showSizeChanger: false }}
+              />
+            )
+          },
+          {
+            key: 'team',
+            label: '班组汇总',
+            children: (
+              <Table
+                rowKey={(row) => String(row.team_id ?? row.team_name)}
+                size="small"
+                loading={loading}
+                dataSource={analysis?.team_summaries ?? []}
+                columns={buildTeamSummaryColumns()}
+                pagination={{ pageSize: 6, showSizeChanger: false }}
+              />
+            )
+          },
+          {
+            key: 'employee',
+            label: '员工汇总',
+            children: (
+              <Table<ProductionPlanEmployeeActual>
+                rowKey="actual_employee_id"
+                size="small"
+                loading={loading}
+                dataSource={analysis?.employee_summaries ?? []}
+                columns={buildEmployeeSummaryColumns()}
+                pagination={{ pageSize: 6, showSizeChanger: false }}
+              />
+            )
+          }
+        ]}
+      />
+    </Card>
+  );
+}
+
+function buildNoWorkPlanColumns(onOpenDetail: (item: ProductionPlanItem) => void): ColumnsType<ProductionPlanItem> {
+  return [
+    {
+      title: '排期活动',
+      dataIndex: 'name',
+      width: 240,
+      render: (value: string, row) => (
+        <Tooltip title={<ScheduleDetail row={row} />}>
+          <Typography.Link className="matrix-ellipsis-text" onClick={() => onOpenDetail(row)}>
+            {value}
+          </Typography.Link>
+        </Tooltip>
+      )
+    },
+    {
+      title: '关联项目',
+      key: 'project',
+      render: (_value, row) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text className="matrix-ellipsis-text">{row.project_case_name ?? '-'}</Typography.Text>
+          <Typography.Text type="secondary" className="production-plan-meta">
+            {[row.case_item_name, row.task_name].filter(Boolean).join(' / ') || '-'}
+          </Typography.Text>
+        </Space>
+      )
+    },
+    { title: '计划时间', key: 'date', width: 170, render: (_value, row) => `${row.planned_start_date} 至 ${row.planned_end_date}` },
+    { title: '班组', dataIndex: 'assigned_team_name', width: 90, render: (value) => value || '-' },
+    { title: '状态', dataIndex: 'effective_status', width: 90, render: (value: string) => <Tag color={STATUS_COLORS[value] ?? 'default'}>{STATUS_LABELS[value] ?? value}</Tag> }
+  ];
+}
+
+function buildWorkLogAnomalyColumns(): ColumnsType<WorkLogEntry> {
+  return [
+    { title: '日期', dataIndex: 'work_date', width: 110 },
+    {
+      title: '项目 / 任务',
+      key: 'project',
+      render: (_value, row) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text className="matrix-ellipsis-text">{row.case_name ?? '-'}</Typography.Text>
+          <Typography.Text type="secondary" className="production-plan-meta">
+            {[row.item_name, row.task_name].filter(Boolean).join(' / ') || '-'}
+          </Typography.Text>
+        </Space>
+      )
+    },
+    {
+      title: '计划活动',
+      dataIndex: 'production_plan_item_name',
+      width: 180,
+      render: (value: string | null, row) => (
+        <Tooltip title={value ? `${value} / ${row.plan_start_date ?? '-'} 至 ${row.plan_end_date ?? '-'}` : '未关联生产计划'}>
+          <Typography.Text className="matrix-ellipsis-text">{value ?? '未排期'}</Typography.Text>
+        </Tooltip>
+      )
+    },
+    { title: '员工', dataIndex: 'actual_employee_name', width: 90, render: (value) => value || '-' },
+    { title: '班组', dataIndex: 'team_name', width: 90, render: (value) => value || '-' },
+    { title: '工时', dataIndex: 'hours', width: 80, render: (value) => formatPlanHours(value) },
+    { title: '内容', dataIndex: 'work_content', width: 220 }
+  ];
+}
+
+function buildTeamSummaryColumns(): ColumnsType<ProductionPlanAnalysis['team_summaries'][number]> {
+  return [
+    { title: '班组', dataIndex: 'team_name', width: 120 },
+    { title: '总工时', dataIndex: 'hours', width: 100, render: (value) => formatPlanHours(value) },
+    { title: '日报数', dataIndex: 'work_log_count', width: 90 },
+    { title: '人数', dataIndex: 'employee_count', width: 80 },
+    { title: '未排期工时', dataIndex: 'unscheduled_hours', width: 120, render: (value) => formatPlanHours(value) },
+    { title: '超计划工时', dataIndex: 'outside_plan_hours', width: 120, render: (value) => formatPlanHours(value) }
+  ];
+}
+
+function buildEmployeeSummaryColumns(): ColumnsType<ProductionPlanEmployeeActual> {
+  return [
+    { title: '员工', dataIndex: 'actual_employee_name', width: 120, render: (value) => value || '-' },
+    { title: '总工时', dataIndex: 'hours', width: 100, render: (value) => formatPlanHours(value) },
+    { title: '日报数', dataIndex: 'work_log_count', width: 90 },
+    { title: '项目数', dataIndex: 'project_count', width: 90, render: (value) => value ?? '-' },
+    { title: '数量', dataIndex: 'quantity', width: 90, render: (value) => value ?? '-' },
+    { title: '件数', dataIndex: 'piece_count', width: 90, render: (value) => value ?? '-' },
+    { title: '重量', dataIndex: 'weight', width: 90, render: (value) => value ? `${value}T` : '-' },
+    { title: '工作日期', key: 'date', width: 180, render: (_value, row) => `${row.first_work_date ?? '-'} 至 ${row.last_work_date ?? '-'}` }
+  ];
+}
+
+function ProductionPlanDetailContent({ data }: { data: ProductionPlanItemDetails }) {
+  const item = data.item;
+  return (
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Space direction="vertical" size={2} style={{ width: '100%' }}>
+        <Typography.Title level={4} style={{ margin: 0 }}>{item.name}</Typography.Title>
+        <Typography.Text type="secondary">
+          {[item.project_case_name, item.case_item_name, item.task_name].filter(Boolean).join(' / ') || '-'}
+        </Typography.Text>
+      </Space>
+
+      <Row gutter={10}>
+        <Col span={6}><Card size="small"><Statistic title="计划天数" value={data.summary.planned_days} suffix="天" /></Card></Col>
+        <Col span={6}><Card size="small"><Statistic title="实际工时" value={Math.round(Number(data.summary.actual_hours ?? 0) * 10) / 10} suffix="h" /></Card></Col>
+        <Col span={6}><Card size="small"><Statistic title="日报数" value={data.summary.work_log_count} /></Card></Col>
+        <Col span={6}><Card size="small"><Statistic title="超计划" value={data.summary.outside_plan_count} /></Card></Col>
+      </Row>
+
+      <Card size="small" title="计划与实际">
+        <div className="production-detail-grid">
+          <div><span>计划时间</span><strong>{item.planned_start_date} 至 {item.planned_end_date}</strong></div>
+          <div><span>实际日期</span><strong>{item.actual_start_date ? `${item.actual_start_date} 至 ${item.actual_end_date ?? item.actual_start_date}` : '-'}</strong></div>
+          <div><span>班组</span><strong>{item.assigned_team_name ?? '-'}</strong></div>
+          <div><span>完成度</span><strong>{Math.round(Number(item.progress ?? 0))}%</strong></div>
+          <div><span>数量</span><strong>{data.summary.actual_quantity ?? '-'}</strong></div>
+          <div><span>件数</span><strong>{data.summary.actual_piece_count ?? '-'}</strong></div>
+          <div><span>重量</span><strong>{data.summary.actual_weight ? `${data.summary.actual_weight}T` : '-'}</strong></div>
+          <div><span>状态</span><strong>{STATUS_LABELS[item.effective_status] ?? item.effective_status}</strong></div>
+        </div>
+      </Card>
+
+      <Tabs
+        size="small"
+        items={[
+          {
+            key: 'logs',
+            label: '日报明细',
+            children: (
+              <Table<WorkLogEntry>
+                rowKey="id"
+                size="small"
+                dataSource={data.work_logs}
+                columns={buildWorkLogAnomalyColumns()}
+                pagination={{ pageSize: 8, showSizeChanger: false }}
+              />
+            )
+          },
+          {
+            key: 'daily',
+            label: '按日汇总',
+            children: (
+              <Table<ProductionPlanDailyActual>
+                rowKey="work_date"
+                size="small"
+                dataSource={data.daily_actuals}
+                columns={[
+                  { title: '日期', dataIndex: 'work_date', width: 120 },
+                  { title: '工时', dataIndex: 'hours', width: 100, render: (value) => formatPlanHours(value) },
+                  { title: '日报数', dataIndex: 'work_log_count', width: 90 },
+                  { title: '人数', dataIndex: 'employee_count', width: 80 },
+                  { title: '数量', dataIndex: 'quantity', width: 90, render: (value) => value ?? '-' },
+                  { title: '件数', dataIndex: 'piece_count', width: 90, render: (value) => value ?? '-' },
+                  { title: '重量', dataIndex: 'weight', width: 90, render: (value) => value ? `${value}T` : '-' }
+                ]}
+                pagination={false}
+              />
+            )
+          },
+          {
+            key: 'employee',
+            label: '按员工汇总',
+            children: (
+              <Table<ProductionPlanEmployeeActual>
+                rowKey="actual_employee_id"
+                size="small"
+                dataSource={data.employee_actuals}
+                columns={buildEmployeeSummaryColumns()}
+                pagination={false}
+              />
+            )
+          }
+        ]}
+      />
+    </Space>
+  );
 }
 
 function buildBacklogColumns(onSchedule: (item: ProductionPlanBacklogItem) => void): ColumnsType<ProductionPlanBacklogItem> {
@@ -520,6 +849,8 @@ function ScheduleDetail({ row }: { row: ProductionPlanItem }) {
       <div><span>排期：</span>{row.planned_start_date} 至 {row.planned_end_date}，{row.duration_days}天</div>
       <div><span>班组：</span>{row.assigned_team_name ?? '-'}</div>
       <div><span>进度：</span>{progress}%</div>
+      <div><span>实际：</span>{formatPlanHours(row.actual_hours)} / {row.work_log_count ?? 0} 条 / {row.actual_employee_count ?? 0} 人</div>
+      {row.actual_start_date ? <div><span>实际日期：</span>{row.actual_start_date} 至 {row.actual_end_date ?? row.actual_start_date}</div> : null}
       <div><span>状态：</span>{STATUS_LABELS[row.effective_status] ?? row.effective_status}</div>
       {row.remark ? <div><span>备注：</span>{row.remark}</div> : null}
     </div>
@@ -572,7 +903,7 @@ function GanttTimeline({ dates, row }: { dates: string[]; row: ProductionPlanIte
   const left = startIndex * GANTT_DAY_WIDTH + 3;
   const barWidth = duration * GANTT_DAY_WIDTH - 6;
   const progress = Math.max(0, Math.min(100, Math.round(Number(row.progress ?? 0))));
-  const title = `${row.name}：${row.planned_start_date} 至 ${row.planned_end_date}，完成 ${progress}%`;
+  const title = `${row.name}：${row.planned_start_date} 至 ${row.planned_end_date}，完成 ${progress}%，实际 ${formatPlanHours(row.actual_hours)}`;
   return (
     <Tooltip title={title}>
       <div className="gantt-row-track" style={{ width, height: GANTT_ROW_HEIGHT }}>
@@ -596,6 +927,7 @@ function GanttTimeline({ dates, row }: { dates: string[]; row: ProductionPlanIte
           <span className="gantt-bar-fill" />
           <span className="gantt-bar-label">{row.name}</span>
           <span className="gantt-bar-progress">{progress}%</span>
+          {Number(row.actual_hours ?? 0) > 0 ? <span className="gantt-bar-actual">{formatPlanHours(row.actual_hours)}</span> : null}
         </div>
       </div>
     </Tooltip>
@@ -605,4 +937,10 @@ function GanttTimeline({ dates, row }: { dates: string[]; row: ProductionPlanIte
 function defaultScheduleDates(planStartDate?: string): [Dayjs, Dayjs] {
   const start = planStartDate ? dayjs(planStartDate) : dayjs().startOf('month');
   return [start, start.add(2, 'day')];
+}
+
+function formatPlanHours(value: unknown) {
+  const hours = Number(value ?? 0);
+  if (!Number.isFinite(hours)) return '0h';
+  return `${Math.round(hours * 10) / 10}h`;
 }

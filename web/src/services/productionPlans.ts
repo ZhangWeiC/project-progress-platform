@@ -1,5 +1,5 @@
 import { apiDelete, apiGet, apiPatch, apiPost } from './api';
-import type { ProductionPlanBoardResponse } from '../types';
+import type { ProductionPlanBoardResponse, ProductionPlanItemDetails } from '../types';
 
 export type ProductionPlanBoardFilters = {
   department_id?: string;
@@ -40,3 +40,6 @@ export const updateProductionPlanItem = (itemId: string, payload: ProductionPlan
 
 export const deleteProductionPlanItem = (itemId: string) =>
   apiDelete<{ ok: boolean }>(`/api/production-plans/items/${itemId}`);
+
+export const fetchProductionPlanItemDetails = (itemId: string) =>
+  apiGet<ProductionPlanItemDetails>(`/api/production-plans/items/${itemId}/details`);
