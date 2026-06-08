@@ -91,6 +91,8 @@ export type CaseTask = {
   case_item_id?: string | null;
   name: string;
   task_type: string;
+  assignee_id?: string | null;
+  team_id?: string | null;
   status: string;
   progress: number;
   assignee_name?: string;
@@ -121,19 +123,51 @@ export type WorkLogEntry = {
   case_item_id?: string | null;
   case_task_id: string;
   case_subtask_id?: string | null;
+  production_plan_item_id?: string | null;
   case_name?: string;
   item_name?: string;
   task_name?: string;
   subtask_name?: string;
+  production_plan_item_name?: string | null;
+  plan_start_date?: string | null;
+  plan_end_date?: string | null;
+  schedule_link_status?: 'scheduled' | 'outside_plan' | 'unscheduled';
   actual_employee_id: string;
   actual_employee_name?: string;
   input_by_name?: string;
+  team_id?: string | null;
+  team_name?: string | null;
   work_date: string;
   hours: number;
   work_content: string;
   output_note?: string;
   quantity?: number | null;
+  piece_count?: number | null;
+  weight?: number | null;
   unit?: string | null;
+};
+
+export type ProductionPlanDailyActual = {
+  work_date: string;
+  hours: number;
+  work_log_count: number;
+  employee_count: number;
+  quantity?: number | null;
+  piece_count?: number | null;
+  weight?: number | null;
+};
+
+export type ProductionPlanEmployeeActual = {
+  actual_employee_id: string;
+  actual_employee_name?: string | null;
+  hours: number;
+  work_log_count: number;
+  project_count?: number;
+  quantity?: number | null;
+  piece_count?: number | null;
+  weight?: number | null;
+  first_work_date?: string | null;
+  last_work_date?: string | null;
 };
 
 export type ExceptionRecord = {
@@ -259,6 +293,8 @@ export type ProductionPlan = {
 export type ProductionPlanItem = {
   id: string;
   production_plan_id: string;
+  department_id?: string | null;
+  department_name?: string | null;
   project_case_id?: string | null;
   project_case_name?: string | null;
   case_item_id?: string | null;
@@ -277,6 +313,137 @@ export type ProductionPlanItem = {
   effective_status: string;
   duration_days: number;
   remark?: string | null;
+  actual_hours?: number;
+  actual_employee_count?: number;
+  work_log_count?: number;
+  actual_quantity?: number | null;
+  actual_piece_count?: number | null;
+  actual_weight?: number | null;
+  actual_start_date?: string | null;
+  actual_end_date?: string | null;
+};
+
+export type WorkLogPlanItem = ProductionPlanItem & {
+  department_id: string;
+  department_name?: string | null;
+  actual_hours: number;
+  actual_employee_count: number;
+  work_log_count: number;
+};
+
+export type ProductionPlanAnalysis = {
+  summary: {
+    not_reported_count: number;
+    unscheduled_count: number;
+    outside_plan_count: number;
+    team_count: number;
+    employee_count: number;
+  };
+  no_work_plan_items: ProductionPlanItem[];
+  unscheduled_work_logs: WorkLogEntry[];
+  outside_plan_work_logs: WorkLogEntry[];
+  team_summaries: Array<{
+    team_id?: string | null;
+    team_name: string;
+    hours: number;
+    work_log_count: number;
+    employee_count: number;
+    unscheduled_hours: number;
+    outside_plan_hours: number;
+  }>;
+  employee_summaries: ProductionPlanEmployeeActual[];
+};
+
+export type ProductionPlanItemDetails = {
+  item: WorkLogPlanItem;
+  summary: {
+    planned_days: number;
+    actual_hours: number;
+    work_log_count: number;
+    actual_employee_count: number;
+    outside_plan_count: number;
+    actual_quantity?: number | null;
+    actual_piece_count?: number | null;
+    actual_weight?: number | null;
+  };
+  daily_actuals: ProductionPlanDailyActual[];
+  employee_actuals: ProductionPlanEmployeeActual[];
+  work_logs: WorkLogEntry[];
+};
+
+export type WorkSummaryReport = {
+  period: 'week' | 'month';
+  range: {
+    start_date: string;
+    end_date: string;
+    today: string;
+    report_cutoff_date: string;
+  };
+  summary: {
+    active_project_count: number;
+    open_exception_count: number;
+    planned_project_count: number;
+    planned_item_count: number;
+    completed_item_count: number;
+    not_reported_count: number;
+    delayed_plan_count: number;
+    actual_project_count: number;
+    actual_hours: number;
+    work_log_count: number;
+    employee_count: number;
+    unscheduled_hours: number;
+    outside_plan_hours: number;
+    unscheduled_count: number;
+    outside_plan_count: number;
+    quantity?: number | null;
+    piece_count?: number | null;
+    weight?: number | null;
+  };
+  report_text: string[];
+  department_summaries: Array<{
+    department_id?: string | null;
+    department_name: string;
+    planned_item_count: number;
+    completed_item_count: number;
+    actual_hours: number;
+    work_log_count: number;
+    employee_count: number;
+    unscheduled_hours: number;
+    outside_plan_hours: number;
+  }>;
+  team_summaries: Array<{
+    team_id?: string | null;
+    team_name: string;
+    planned_item_count: number;
+    completed_item_count: number;
+    actual_hours: number;
+    work_log_count: number;
+    employee_count: number;
+    unscheduled_hours: number;
+    outside_plan_hours: number;
+  }>;
+  employee_summaries: ProductionPlanEmployeeActual[];
+  project_summaries: Array<{
+    project_case_id: string;
+    project_case_name: string;
+    total_progress?: number | null;
+    planned_item_count: number;
+    completed_item_count: number;
+    actual_hours: number;
+    work_log_count: number;
+    employee_count: number;
+    unscheduled_hours: number;
+    outside_plan_hours: number;
+    open_exception_count: number;
+  }>;
+  no_work_plan_items: ProductionPlanItem[];
+  anomaly_work_logs: WorkLogEntry[];
+  open_exceptions: ExceptionRecord[];
+  filters: {
+    departments: Array<{ id: string; name: string }>;
+    teams: Array<{ id: string; name: string; leader_id?: string | null }>;
+    projects: Array<{ id: string; name: string }>;
+  };
 };
 
 export type ProductionPlanBacklogItem = {
@@ -309,6 +476,7 @@ export type ProductionPlanBoardResponse = {
     scheduled_days: number;
     completed_count: number;
     backlog_count: number;
+    actual_hours?: number;
   };
   filters: {
     departments: Array<{ id: string; name: string }>;
@@ -316,4 +484,5 @@ export type ProductionPlanBoardResponse = {
     projects: Array<{ id: string; name: string }>;
     months: string[];
   };
+  analysis?: ProductionPlanAnalysis;
 };

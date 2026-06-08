@@ -1231,6 +1231,42 @@ export type UpdateProductionPlanItemInput = {
   remark?: string;
 };
 
+export type WorkLogInput = {
+  project_case_id?: string;
+  case_item_id?: string | null;
+  case_task_id: string;
+  case_subtask_id?: string | null;
+  production_plan_item_id?: string | null;
+  actual_employee_id: string;
+  team_id?: string | null;
+  work_date: string;
+  hours: number;
+  work_content: string;
+  output_note?: string;
+  quantity?: number | null;
+  piece_count?: number | null;
+  weight?: number | null;
+  unit?: string | null;
+};
+
+export type WorkLogPlanItemFilters = {
+  work_date?: string;
+  team_id?: string;
+  project_case_id?: string;
+  department_id?: string;
+};
+
+export type ProductionPlanAnalysisRow = Record<string, unknown>;
+
+export type WorkSummaryReportFilters = {
+  period?: 'week' | 'month';
+  start_date?: string;
+  end_date?: string;
+  department_id?: string;
+  team_id?: string;
+  project_case_id?: string;
+};
+
 type ProductionPlanRow = {
   id: string;
   department_id: string;
@@ -1262,6 +1298,14 @@ type ProductionPlanItemRow = {
   progress: number;
   status: string;
   remark: string | null;
+  actual_hours: number;
+  actual_employee_count: number;
+  work_log_count: number;
+  actual_quantity: number | null;
+  actual_piece_count: number | null;
+  actual_weight: number | null;
+  actual_start_date: string | null;
+  actual_end_date: string | null;
 };
 
 type ProductionPlanBacklogRow = {
@@ -1283,6 +1327,36 @@ type ProductionPlanBacklogRow = {
   open_exception_count: number;
 };
 
+type WorkLogTaskRow = {
+  id: string;
+  project_case_id: string;
+  case_item_id: string | null;
+  owner_department_id: string | null;
+  assignee_id: string | null;
+  team_id: string | null;
+};
+
+type WorkLogPlanItemRow = {
+  id: string;
+  project_case_id: string | null;
+  case_item_id: string | null;
+  case_task_id: string | null;
+  planned_start_date: string;
+  planned_end_date: string;
+  assigned_team_id: string | null;
+  department_id: string;
+};
+
+type ProductionPlanItemAccessRow = {
+  id: string;
+  project_case_id: string | null;
+  case_item_id: string | null;
+  case_task_id: string | null;
+  assigned_team_id: string | null;
+  department_id: string;
+  task_assignee_id: string | null;
+};
+
 function getSchedulableDepartments() {
   return db
     .prepare(
@@ -1297,6 +1371,584 @@ function getSchedulableDepartments() {
        ORDER BY first_sort_order, name`
     )
     .all() as Array<{ id: string; name: string }>;
+}
+
+export function getWorkSummaryReport(user: CurrentUser, filters: WorkSummaryReportFilters) {
+  const period = filters.period === 'week' ? 'week' : 'month';
+  const range = resolveReportRange(period, filters.start_date, filters.end_date);
+  if (filters.project_case_id) assertCanReadCase(user, filters.project_case_id);
+
+  const departments = getSchedulableDepartments();
+  const teams = db.prepare('SELECT id, name, leader_id FROM team ORDER BY name').all();
+  const projects = db.prepare('SELECT id, name FROM project_case ORDER BY source_seq, id').all();
+
+  const planWhere = buildReportPlanWhere(user, filters, range.start_date, range.end_date);
+  const workWhere = buildReportWorkLogWhere(user, filters, range.start_date, range.end_date);
+
+  const planSummary = db
+    .prepare(
+      `SELECT COUNT(*) as planned_item_count,
+              SUM(CASE WHEN ppi.progress >= 100 OR ppi.status = 'completed' THEN 1 ELSE 0 END) as completed_item_count,
+              SUM(CASE WHEN COALESCE(wla.actual_hours, 0) <= 0 AND ppi.planned_start_date <= ? THEN 1 ELSE 0 END) as not_reported_count,
+              SUM(CASE WHEN COALESCE(wla.actual_hours, 0) <= 0 AND ppi.planned_end_date < ? THEN 1 ELSE 0 END) as delayed_plan_count,
+              COUNT(DISTINCT ppi.project_case_id) as planned_project_count
+       FROM production_plan_item ppi
+       JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       LEFT JOIN case_task ct ON ct.id = ppi.case_task_id
+       LEFT JOIN (
+         SELECT production_plan_item_id, SUM(hours) as actual_hours
+         FROM work_log_entry
+         WHERE production_plan_item_id IS NOT NULL
+         GROUP BY production_plan_item_id
+       ) wla ON wla.production_plan_item_id = ppi.id
+       WHERE ${planWhere.where.join(' AND ')}`
+    )
+    .get(range.report_cutoff_date, range.today, ...planWhere.params) as Record<string, number | null>;
+
+  const workSummary = db
+    .prepare(
+      `SELECT SUM(wl.hours) as actual_hours,
+              COUNT(*) as work_log_count,
+              COUNT(DISTINCT wl.actual_employee_id) as employee_count,
+              COUNT(DISTINCT wl.project_case_id) as actual_project_count,
+              SUM(CASE WHEN wl.production_plan_item_id IS NULL THEN wl.hours ELSE 0 END) as unscheduled_hours,
+              SUM(CASE WHEN wl.production_plan_item_id IS NOT NULL
+                        AND (wl.work_date < ppi.planned_start_date OR wl.work_date > ppi.planned_end_date)
+                       THEN wl.hours ELSE 0 END) as outside_plan_hours,
+              SUM(CASE WHEN wl.production_plan_item_id IS NULL THEN 1 ELSE 0 END) as unscheduled_count,
+              SUM(CASE WHEN wl.production_plan_item_id IS NOT NULL
+                        AND (wl.work_date < ppi.planned_start_date OR wl.work_date > ppi.planned_end_date)
+                       THEN 1 ELSE 0 END) as outside_plan_count,
+              SUM(wl.quantity) as quantity,
+              SUM(wl.piece_count) as piece_count,
+              SUM(wl.weight) as weight
+       FROM work_log_entry wl
+       JOIN case_task ct ON ct.id = wl.case_task_id
+       LEFT JOIN production_plan_item ppi ON ppi.id = wl.production_plan_item_id
+       LEFT JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       WHERE ${workWhere.where.join(' AND ')}`
+    )
+    .get(...workWhere.params) as Record<string, number | null>;
+
+  const activeProjectCount = getReportActiveProjectCount(user, filters);
+  const openExceptionCount = getReportOpenExceptionCount(user, filters);
+  const departmentSummaries = getReportDepartmentSummaries(user, filters, range.start_date, range.end_date);
+  const teamSummaries = getReportTeamSummaries(user, filters, range.start_date, range.end_date);
+  const employeeSummaries = getReportEmployeeSummaries(user, filters, range.start_date, range.end_date);
+  const projectSummaries = getReportProjectSummaries(user, filters, range.start_date, range.end_date);
+  const noWorkPlanItems = getReportNoWorkPlanItems(user, filters, range.start_date, range.end_date, range.report_cutoff_date);
+  const anomalyWorkLogs = getReportAnomalyWorkLogs(user, filters, range.start_date, range.end_date);
+  const openExceptions = getReportOpenExceptions(user, filters);
+
+  const summary = {
+    active_project_count: activeProjectCount,
+    open_exception_count: openExceptionCount,
+    planned_project_count: Number(planSummary.planned_project_count ?? 0),
+    planned_item_count: Number(planSummary.planned_item_count ?? 0),
+    completed_item_count: Number(planSummary.completed_item_count ?? 0),
+    not_reported_count: Number(planSummary.not_reported_count ?? 0),
+    delayed_plan_count: Number(planSummary.delayed_plan_count ?? 0),
+    actual_project_count: Number(workSummary.actual_project_count ?? 0),
+    actual_hours: roundMetric(workSummary.actual_hours),
+    work_log_count: Number(workSummary.work_log_count ?? 0),
+    employee_count: Number(workSummary.employee_count ?? 0),
+    unscheduled_hours: roundMetric(workSummary.unscheduled_hours),
+    outside_plan_hours: roundMetric(workSummary.outside_plan_hours),
+    unscheduled_count: Number(workSummary.unscheduled_count ?? 0),
+    outside_plan_count: Number(workSummary.outside_plan_count ?? 0),
+    quantity: roundNullableMetric(workSummary.quantity),
+    piece_count: roundNullableMetric(workSummary.piece_count),
+    weight: roundNullableMetric(workSummary.weight)
+  };
+
+  return {
+    period,
+    range,
+    summary,
+    report_text: buildReportText(period, range, summary, departmentSummaries, projectSummaries),
+    department_summaries: departmentSummaries,
+    team_summaries: teamSummaries,
+    employee_summaries: employeeSummaries,
+    project_summaries: projectSummaries,
+    no_work_plan_items: noWorkPlanItems,
+    anomaly_work_logs: anomalyWorkLogs,
+    open_exceptions: openExceptions,
+    filters: {
+      departments,
+      teams,
+      projects
+    }
+  };
+}
+
+function resolveReportRange(period: 'week' | 'month', startDate?: string, endDate?: string) {
+  if ((startDate && !endDate) || (!startDate && endDate)) {
+    const err = new Error('请选择完整的开始和结束日期');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+  if (startDate && endDate) {
+    validateScheduleDates(startDate, endDate);
+    return {
+      start_date: startDate,
+      end_date: endDate,
+      today: nowIso().slice(0, 10),
+      report_cutoff_date: endDate < nowIso().slice(0, 10) ? endDate : nowIso().slice(0, 10)
+    };
+  }
+
+  const latestWork = db.prepare('SELECT MAX(work_date) as max_date FROM work_log_entry').get() as { max_date: string | null };
+  const latestPlan = db.prepare('SELECT MAX(end_date) as max_date FROM production_plan').get() as { max_date: string | null };
+  const anchor = latestWork.max_date ?? latestPlan.max_date ?? nowIso().slice(0, 10);
+  const start = new Date(`${anchor}T00:00:00.000Z`);
+  const end = new Date(start.getTime());
+  if (period === 'week') {
+    const day = start.getUTCDay();
+    const daysFromMonday = day === 0 ? 6 : day - 1;
+    start.setUTCDate(start.getUTCDate() - daysFromMonday);
+    end.setTime(start.getTime());
+    end.setUTCDate(start.getUTCDate() + 6);
+  } else {
+    start.setUTCDate(1);
+    end.setTime(start.getTime());
+    end.setUTCMonth(start.getUTCMonth() + 1);
+    end.setUTCDate(0);
+  }
+  const today = nowIso().slice(0, 10);
+  const endDateValue = formatDate(end);
+  return {
+    start_date: formatDate(start),
+    end_date: endDateValue,
+    today,
+    report_cutoff_date: endDateValue < today ? endDateValue : today
+  };
+}
+
+function buildReportPlanWhere(user: CurrentUser, filters: WorkSummaryReportFilters, startDate: string, endDate: string) {
+  const where = ['ppi.planned_start_date <= ?', 'ppi.planned_end_date >= ?'];
+  const params: unknown[] = [endDate, startDate];
+  if (filters.department_id) {
+    where.push('pp.department_id = ?');
+    params.push(filters.department_id);
+  }
+  if (filters.team_id) {
+    where.push('ppi.assigned_team_id = ?');
+    params.push(filters.team_id);
+  }
+  if (filters.project_case_id) {
+    where.push('ppi.project_case_id = ?');
+    params.push(filters.project_case_id);
+  }
+  if (!canManageProjects(user)) {
+    const employee = db.prepare('SELECT department_id FROM employee WHERE id = ?').get(user.id) as { department_id: string | null } | undefined;
+    where.push(
+      `(ppi.project_case_id IN (SELECT project_case_id FROM project_case_member WHERE user_id = ?)
+        OR ppi.assigned_team_id IN (SELECT id FROM team WHERE leader_id = ?)
+        OR ct.assignee_id = ?
+        OR pp.department_id = ?)`
+    );
+    params.push(user.id, user.id, user.id, employee?.department_id ?? '');
+  }
+  return { where, params };
+}
+
+function buildReportWorkLogWhere(user: CurrentUser, filters: WorkSummaryReportFilters, startDate: string, endDate: string) {
+  const where = ['wl.work_date >= ?', 'wl.work_date <= ?'];
+  const params: unknown[] = [startDate, endDate];
+  if (filters.department_id) {
+    where.push('(pp.department_id = ? OR (wl.production_plan_item_id IS NULL AND ct.owner_department_id = ?))');
+    params.push(filters.department_id, filters.department_id);
+  }
+  if (filters.team_id) {
+    where.push('wl.team_id = ?');
+    params.push(filters.team_id);
+  }
+  if (filters.project_case_id) {
+    where.push('wl.project_case_id = ?');
+    params.push(filters.project_case_id);
+  }
+  if (!canManageProjects(user)) {
+    const employee = db.prepare('SELECT department_id FROM employee WHERE id = ?').get(user.id) as { department_id: string | null } | undefined;
+    where.push(
+      `(wl.project_case_id IN (SELECT project_case_id FROM project_case_member WHERE user_id = ?)
+        OR wl.team_id IN (SELECT id FROM team WHERE leader_id = ?)
+        OR ct.assignee_id = ?
+        OR ct.owner_department_id = ?
+        OR pp.department_id = ?)`
+    );
+    params.push(user.id, user.id, user.id, employee?.department_id ?? '', employee?.department_id ?? '');
+  }
+  return { where, params };
+}
+
+function getReportActiveProjectCount(user: CurrentUser, filters: WorkSummaryReportFilters) {
+  const where = ["pc.status != 'completed'"];
+  const params: unknown[] = [];
+  if (filters.project_case_id) {
+    where.push('pc.id = ?');
+    params.push(filters.project_case_id);
+  }
+  if (!canManageProjects(user)) {
+    where.push('pc.id IN (SELECT project_case_id FROM project_case_member WHERE user_id = ?)');
+    params.push(user.id);
+  }
+  const row = db.prepare(`SELECT COUNT(*) as count FROM project_case pc WHERE ${where.join(' AND ')}`).get(...params) as { count: number };
+  return row.count;
+}
+
+function getReportOpenExceptionCount(user: CurrentUser, filters: WorkSummaryReportFilters) {
+  const where = ["ex.status NOT IN ('resolved', 'closed', 'cancelled')"];
+  const params: unknown[] = [];
+  if (filters.project_case_id) {
+    where.push('ex.project_case_id = ?');
+    params.push(filters.project_case_id);
+  }
+  if (!canManageProjects(user)) {
+    const employee = db.prepare('SELECT department_id FROM employee WHERE id = ?').get(user.id) as { department_id: string | null } | undefined;
+    where.push(
+      `(ex.project_case_id IN (SELECT project_case_id FROM project_case_member WHERE user_id = ?)
+        OR ex.current_handler_id = ?
+        OR ex.responsible_department_id = ?)`
+    );
+    params.push(user.id, user.id, employee?.department_id ?? '');
+  }
+  const row = db.prepare(`SELECT COUNT(*) as count FROM exception_record ex WHERE ${where.join(' AND ')}`).get(...params) as { count: number };
+  return row.count;
+}
+
+function getReportDepartmentSummaries(user: CurrentUser, filters: WorkSummaryReportFilters, startDate: string, endDate: string) {
+  const planWhere = buildReportPlanWhere(user, filters, startDate, endDate);
+  const workWhere = buildReportWorkLogWhere(user, filters, startDate, endDate);
+  const planRows = db
+    .prepare(
+      `SELECT pp.department_id, d.name as department_name,
+              COUNT(*) as planned_item_count,
+              SUM(CASE WHEN ppi.progress >= 100 OR ppi.status = 'completed' THEN 1 ELSE 0 END) as completed_item_count
+       FROM production_plan_item ppi
+       JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       JOIN department d ON d.id = pp.department_id
+       LEFT JOIN case_task ct ON ct.id = ppi.case_task_id
+       WHERE ${planWhere.where.join(' AND ')}
+       GROUP BY pp.department_id, d.name`
+    )
+    .all(...planWhere.params) as Array<Record<string, unknown>>;
+  const workRows = db
+    .prepare(
+      `SELECT COALESCE(pp.department_id, ct.owner_department_id) as department_id,
+              COALESCE(plan_dept.name, task_dept.name, '未分配') as department_name,
+              SUM(wl.hours) as actual_hours,
+              COUNT(*) as work_log_count,
+              COUNT(DISTINCT wl.actual_employee_id) as employee_count,
+              SUM(CASE WHEN wl.production_plan_item_id IS NULL THEN wl.hours ELSE 0 END) as unscheduled_hours,
+              SUM(CASE WHEN wl.production_plan_item_id IS NOT NULL
+                        AND (wl.work_date < ppi.planned_start_date OR wl.work_date > ppi.planned_end_date)
+                       THEN wl.hours ELSE 0 END) as outside_plan_hours
+       FROM work_log_entry wl
+       JOIN case_task ct ON ct.id = wl.case_task_id
+       LEFT JOIN department task_dept ON task_dept.id = ct.owner_department_id
+       LEFT JOIN production_plan_item ppi ON ppi.id = wl.production_plan_item_id
+       LEFT JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       LEFT JOIN department plan_dept ON plan_dept.id = pp.department_id
+       WHERE ${workWhere.where.join(' AND ')}
+       GROUP BY COALESCE(pp.department_id, ct.owner_department_id), COALESCE(plan_dept.name, task_dept.name, '未分配')`
+    )
+    .all(...workWhere.params) as Array<Record<string, unknown>>;
+  return mergeReportPlanAndWorkRows(planRows, workRows, 'department_id', 'department_name');
+}
+
+function getReportTeamSummaries(user: CurrentUser, filters: WorkSummaryReportFilters, startDate: string, endDate: string) {
+  const planWhere = buildReportPlanWhere(user, filters, startDate, endDate);
+  const workWhere = buildReportWorkLogWhere(user, filters, startDate, endDate);
+  const planRows = db
+    .prepare(
+      `SELECT ppi.assigned_team_id as team_id, COALESCE(team.name, '未分配') as team_name,
+              COUNT(*) as planned_item_count,
+              SUM(CASE WHEN ppi.progress >= 100 OR ppi.status = 'completed' THEN 1 ELSE 0 END) as completed_item_count
+       FROM production_plan_item ppi
+       JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       LEFT JOIN case_task ct ON ct.id = ppi.case_task_id
+       LEFT JOIN team ON team.id = ppi.assigned_team_id
+       WHERE ${planWhere.where.join(' AND ')}
+       GROUP BY ppi.assigned_team_id, COALESCE(team.name, '未分配')`
+    )
+    .all(...planWhere.params) as Array<Record<string, unknown>>;
+  const workRows = db
+    .prepare(
+      `SELECT wl.team_id, COALESCE(team.name, '未分配') as team_name,
+              SUM(wl.hours) as actual_hours,
+              COUNT(*) as work_log_count,
+              COUNT(DISTINCT wl.actual_employee_id) as employee_count,
+              SUM(CASE WHEN wl.production_plan_item_id IS NULL THEN wl.hours ELSE 0 END) as unscheduled_hours,
+              SUM(CASE WHEN wl.production_plan_item_id IS NOT NULL
+                        AND (wl.work_date < ppi.planned_start_date OR wl.work_date > ppi.planned_end_date)
+                       THEN wl.hours ELSE 0 END) as outside_plan_hours
+       FROM work_log_entry wl
+       JOIN case_task ct ON ct.id = wl.case_task_id
+       LEFT JOIN team ON team.id = wl.team_id
+       LEFT JOIN production_plan_item ppi ON ppi.id = wl.production_plan_item_id
+       LEFT JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       WHERE ${workWhere.where.join(' AND ')}
+       GROUP BY wl.team_id, COALESCE(team.name, '未分配')`
+    )
+    .all(...workWhere.params) as Array<Record<string, unknown>>;
+  return mergeReportPlanAndWorkRows(planRows, workRows, 'team_id', 'team_name');
+}
+
+function getReportEmployeeSummaries(user: CurrentUser, filters: WorkSummaryReportFilters, startDate: string, endDate: string) {
+  const workWhere = buildReportWorkLogWhere(user, filters, startDate, endDate);
+  return db
+    .prepare(
+      `SELECT wl.actual_employee_id, emp.name as actual_employee_name,
+              SUM(wl.hours) as hours,
+              COUNT(*) as work_log_count,
+              COUNT(DISTINCT wl.project_case_id) as project_count,
+              SUM(wl.quantity) as quantity,
+              SUM(wl.piece_count) as piece_count,
+              SUM(wl.weight) as weight,
+              MIN(wl.work_date) as first_work_date,
+              MAX(wl.work_date) as last_work_date
+       FROM work_log_entry wl
+       JOIN case_task ct ON ct.id = wl.case_task_id
+       LEFT JOIN employee emp ON emp.id = wl.actual_employee_id
+       LEFT JOIN production_plan_item ppi ON ppi.id = wl.production_plan_item_id
+       LEFT JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       WHERE ${workWhere.where.join(' AND ')}
+       GROUP BY wl.actual_employee_id, emp.name
+       ORDER BY hours DESC, emp.name
+       LIMIT 80`
+    )
+    .all(...workWhere.params);
+}
+
+function getReportProjectSummaries(user: CurrentUser, filters: WorkSummaryReportFilters, startDate: string, endDate: string) {
+  const planWhere = buildReportPlanWhere(user, filters, startDate, endDate);
+  const workWhere = buildReportWorkLogWhere(user, filters, startDate, endDate);
+  const planRows = db
+    .prepare(
+      `SELECT ppi.project_case_id, pc.name as project_case_name,
+              pc.total_progress,
+              COUNT(*) as planned_item_count,
+              SUM(CASE WHEN ppi.progress >= 100 OR ppi.status = 'completed' THEN 1 ELSE 0 END) as completed_item_count
+       FROM production_plan_item ppi
+       JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       JOIN project_case pc ON pc.id = ppi.project_case_id
+       LEFT JOIN case_task ct ON ct.id = ppi.case_task_id
+       WHERE ${planWhere.where.join(' AND ')}
+       GROUP BY ppi.project_case_id, pc.name, pc.total_progress`
+    )
+    .all(...planWhere.params) as Array<Record<string, unknown>>;
+  const workRows = db
+    .prepare(
+      `SELECT wl.project_case_id, pc.name as project_case_name,
+              pc.total_progress,
+              SUM(wl.hours) as actual_hours,
+              COUNT(*) as work_log_count,
+              COUNT(DISTINCT wl.actual_employee_id) as employee_count,
+              SUM(CASE WHEN wl.production_plan_item_id IS NULL THEN wl.hours ELSE 0 END) as unscheduled_hours,
+              SUM(CASE WHEN wl.production_plan_item_id IS NOT NULL
+                        AND (wl.work_date < ppi.planned_start_date OR wl.work_date > ppi.planned_end_date)
+                       THEN wl.hours ELSE 0 END) as outside_plan_hours
+       FROM work_log_entry wl
+       JOIN project_case pc ON pc.id = wl.project_case_id
+       JOIN case_task ct ON ct.id = wl.case_task_id
+       LEFT JOIN production_plan_item ppi ON ppi.id = wl.production_plan_item_id
+       LEFT JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       WHERE ${workWhere.where.join(' AND ')}
+       GROUP BY wl.project_case_id, pc.name, pc.total_progress`
+    )
+    .all(...workWhere.params) as Array<Record<string, unknown>>;
+  const merged = mergeReportPlanAndWorkRows(planRows, workRows, 'project_case_id', 'project_case_name');
+  const exceptionCounts = db
+    .prepare(
+      `SELECT project_case_id, COUNT(*) as open_exception_count
+       FROM exception_record
+       WHERE status NOT IN ('resolved', 'closed', 'cancelled')
+       GROUP BY project_case_id`
+    )
+    .all() as Array<{ project_case_id: string; open_exception_count: number }>;
+  const exceptionMap = new Map(exceptionCounts.map((row) => [row.project_case_id, row.open_exception_count]));
+  return merged.map((row) => ({ ...row, open_exception_count: exceptionMap.get(String(row.project_case_id)) ?? 0 })).slice(0, 80);
+}
+
+function getReportNoWorkPlanItems(user: CurrentUser, filters: WorkSummaryReportFilters, startDate: string, endDate: string, cutoffDate: string) {
+  const planWhere = buildReportPlanWhere(user, filters, startDate, endDate);
+  planWhere.where.push('COALESCE(wla.actual_hours, 0) <= 0');
+  planWhere.where.push('ppi.planned_start_date <= ?');
+  planWhere.params.push(cutoffDate);
+  return db
+    .prepare(
+      `SELECT ppi.*, pp.department_id, d.name as department_name,
+              pc.name as project_case_name, ci.name as case_item_name,
+              ct.name as task_name, tm.name as assigned_team_name,
+              COALESCE(wla.actual_hours, 0) as actual_hours,
+              COALESCE(wla.work_log_count, 0) as work_log_count
+       FROM production_plan_item ppi
+       JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       JOIN department d ON d.id = pp.department_id
+       LEFT JOIN project_case pc ON pc.id = ppi.project_case_id
+       LEFT JOIN case_item ci ON ci.id = ppi.case_item_id
+       LEFT JOIN case_task ct ON ct.id = ppi.case_task_id
+       LEFT JOIN team tm ON tm.id = ppi.assigned_team_id
+       LEFT JOIN (
+         SELECT production_plan_item_id, SUM(hours) as actual_hours, COUNT(*) as work_log_count
+         FROM work_log_entry
+         WHERE production_plan_item_id IS NOT NULL
+         GROUP BY production_plan_item_id
+       ) wla ON wla.production_plan_item_id = ppi.id
+       WHERE ${planWhere.where.join(' AND ')}
+       ORDER BY ppi.planned_end_date, ppi.sort_order
+       LIMIT 80`
+    )
+    .all(...planWhere.params)
+    .map((row) => {
+      const item = row as ProductionPlanItemRow;
+      return {
+        ...item,
+        duration_days: daysBetween(item.planned_start_date, item.planned_end_date),
+        effective_status: item.planned_end_date < nowIso().slice(0, 10) ? 'delayed' : productionPlanStatus(item)
+      };
+    });
+}
+
+function getReportAnomalyWorkLogs(user: CurrentUser, filters: WorkSummaryReportFilters, startDate: string, endDate: string) {
+  const workWhere = buildReportWorkLogWhere(user, filters, startDate, endDate);
+  workWhere.where.push(`(wl.production_plan_item_id IS NULL OR (wl.work_date < ppi.planned_start_date OR wl.work_date > ppi.planned_end_date))`);
+  return db
+    .prepare(
+      `SELECT wl.*, pc.name as case_name, ci.name as item_name, ct.name as task_name,
+              emp.name as actual_employee_name, team.name as team_name,
+              ppi.name as production_plan_item_name,
+              ppi.planned_start_date as plan_start_date,
+              ppi.planned_end_date as plan_end_date,
+              CASE
+                WHEN wl.production_plan_item_id IS NULL THEN 'unscheduled'
+                WHEN wl.work_date < ppi.planned_start_date OR wl.work_date > ppi.planned_end_date THEN 'outside_plan'
+                ELSE 'scheduled'
+              END as schedule_link_status
+       FROM work_log_entry wl
+       JOIN project_case pc ON pc.id = wl.project_case_id
+       LEFT JOIN case_item ci ON ci.id = wl.case_item_id
+       JOIN case_task ct ON ct.id = wl.case_task_id
+       LEFT JOIN employee emp ON emp.id = wl.actual_employee_id
+       LEFT JOIN team ON team.id = wl.team_id
+       LEFT JOIN production_plan_item ppi ON ppi.id = wl.production_plan_item_id
+       LEFT JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       WHERE ${workWhere.where.join(' AND ')}
+       ORDER BY wl.work_date DESC, wl.id
+       LIMIT 100`
+    )
+    .all(...workWhere.params);
+}
+
+function getReportOpenExceptions(user: CurrentUser, filters: WorkSummaryReportFilters) {
+  const where = ["ex.status NOT IN ('resolved', 'closed', 'cancelled')"];
+  const params: unknown[] = [];
+  if (filters.project_case_id) {
+    where.push('ex.project_case_id = ?');
+    params.push(filters.project_case_id);
+  }
+  if (!canManageProjects(user)) {
+    const employee = db.prepare('SELECT department_id FROM employee WHERE id = ?').get(user.id) as { department_id: string | null } | undefined;
+    where.push(
+      `(ex.project_case_id IN (SELECT project_case_id FROM project_case_member WHERE user_id = ?)
+        OR ex.current_handler_id = ?
+        OR ex.responsible_department_id = ?)`
+    );
+    params.push(user.id, user.id, employee?.department_id ?? '');
+  }
+  return db
+    .prepare(
+      `SELECT ex.*, pc.name as case_name, ci.name as item_name, ct.name as task_name,
+              dept.name as responsible_department_name
+       FROM exception_record ex
+       JOIN project_case pc ON pc.id = ex.project_case_id
+       LEFT JOIN case_item ci ON ci.id = ex.case_item_id
+       LEFT JOIN case_task ct ON ct.id = ex.case_task_id
+       LEFT JOIN department dept ON dept.id = ex.responsible_department_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY ex.updated_at DESC
+       LIMIT 80`
+    )
+    .all(...params);
+}
+
+function mergeReportPlanAndWorkRows(planRows: Array<Record<string, unknown>>, workRows: Array<Record<string, unknown>>, idKey: string, nameKey: string) {
+  const map = new Map<string, Record<string, unknown>>();
+  const ensure = (row: Record<string, unknown>) => {
+    const id = String(row[idKey] ?? 'unassigned');
+    const current = map.get(id) ?? {
+      [idKey]: row[idKey] ?? null,
+      [nameKey]: row[nameKey] ?? '未分配',
+      planned_item_count: 0,
+      completed_item_count: 0,
+      actual_hours: 0,
+      work_log_count: 0,
+      employee_count: 0,
+      unscheduled_hours: 0,
+      outside_plan_hours: 0
+    };
+    map.set(id, current);
+    return current;
+  };
+  for (const row of planRows) {
+    const current = ensure(row);
+    current.planned_item_count = Number(row.planned_item_count ?? 0);
+    current.completed_item_count = Number(row.completed_item_count ?? 0);
+    if (row.total_progress !== undefined) current.total_progress = row.total_progress;
+  }
+  for (const row of workRows) {
+    const current = ensure(row);
+    current.actual_hours = roundMetric(row.actual_hours);
+    current.work_log_count = Number(row.work_log_count ?? 0);
+    current.employee_count = Number(row.employee_count ?? 0);
+    current.unscheduled_hours = roundMetric(row.unscheduled_hours);
+    current.outside_plan_hours = roundMetric(row.outside_plan_hours);
+    if (row.total_progress !== undefined) current.total_progress = row.total_progress;
+  }
+  return Array.from(map.values()).sort((left, right) =>
+    Number(right.actual_hours ?? 0) - Number(left.actual_hours ?? 0) ||
+    Number(right.planned_item_count ?? 0) - Number(left.planned_item_count ?? 0) ||
+    String(left[nameKey] ?? '').localeCompare(String(right[nameKey] ?? ''), 'zh-Hans-CN')
+  );
+}
+
+function buildReportText(
+  period: 'week' | 'month',
+  range: { start_date: string; end_date: string },
+  summary: Record<string, unknown>,
+  departmentSummaries: Array<Record<string, unknown>>,
+  projectSummaries: Array<Record<string, unknown>>
+) {
+  const topDepartment = departmentSummaries[0];
+  const topProject = projectSummaries[0];
+  return [
+    `${period === 'week' ? '周报' : '月报'}周期：${range.start_date} 至 ${range.end_date}`,
+    `本期累计日报 ${summary.work_log_count ?? 0} 条，工时 ${formatReportHours(summary.actual_hours)}，参与员工 ${summary.employee_count ?? 0} 人。`,
+    `生产计划共 ${summary.planned_item_count ?? 0} 项，已完成 ${summary.completed_item_count ?? 0} 项，排了未报 ${summary.not_reported_count ?? 0} 项。`,
+    `偏差：未排期日报 ${summary.unscheduled_count ?? 0} 条 / ${formatReportHours(summary.unscheduled_hours)}，超计划日报 ${summary.outside_plan_count ?? 0} 条 / ${formatReportHours(summary.outside_plan_hours)}。`,
+    topDepartment ? `工时最高部门：${topDepartment.department_name ?? '-'}，${formatReportHours(topDepartment.actual_hours)}。` : '暂无部门工时数据。',
+    topProject ? `工时最高项目：${topProject.project_case_name ?? '-'}，${formatReportHours(topProject.actual_hours)}。` : '暂无项目工时数据。',
+    `当前未关闭异常 ${summary.open_exception_count ?? 0} 个，仍需跟踪延期和未报工事项。`
+  ];
+}
+
+function formatDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function roundMetric(value: unknown) {
+  const numberValue = Number(value ?? 0);
+  if (!Number.isFinite(numberValue)) return 0;
+  return Math.round(numberValue * 10) / 10;
+}
+
+function roundNullableMetric(value: unknown) {
+  if (value === null || value === undefined) return null;
+  return roundMetric(value);
+}
+
+function formatReportHours(value: unknown) {
+  return `${roundMetric(value)}h`;
 }
 
 export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPlanFilters) {
@@ -1425,13 +2077,35 @@ export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPla
   const items = db
     .prepare(
       `SELECT ppi.*, pc.name as project_case_name, ci.name as case_item_name,
-              ct.name as task_name, tm.name as assigned_team_name
+              ct.name as task_name, tm.name as assigned_team_name,
+              COALESCE(wla.actual_hours, 0) as actual_hours,
+              COALESCE(wla.actual_employee_count, 0) as actual_employee_count,
+              COALESCE(wla.work_log_count, 0) as work_log_count,
+              wla.actual_quantity,
+              wla.actual_piece_count,
+              wla.actual_weight,
+              wla.actual_start_date,
+              wla.actual_end_date
        FROM production_plan_item ppi
        JOIN production_plan pp ON pp.id = ppi.production_plan_id
        LEFT JOIN project_case pc ON pc.id = ppi.project_case_id
        LEFT JOIN case_item ci ON ci.id = ppi.case_item_id
        LEFT JOIN case_task ct ON ct.id = ppi.case_task_id
        LEFT JOIN team tm ON tm.id = ppi.assigned_team_id
+       LEFT JOIN (
+         SELECT production_plan_item_id,
+                SUM(hours) as actual_hours,
+                COUNT(*) as work_log_count,
+                COUNT(DISTINCT actual_employee_id) as actual_employee_count,
+                SUM(quantity) as actual_quantity,
+                SUM(piece_count) as actual_piece_count,
+                SUM(weight) as actual_weight,
+                MIN(work_date) as actual_start_date,
+                MAX(work_date) as actual_end_date
+         FROM work_log_entry
+         WHERE production_plan_item_id IS NOT NULL
+         GROUP BY production_plan_item_id
+       ) wla ON wla.production_plan_item_id = ppi.id
        WHERE ${itemWhere.join(' AND ')}
        ORDER BY pp.plan_month, ppi.sort_order, ppi.id`
     )
@@ -1442,7 +2116,9 @@ export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPla
   const dates = enumerateDates(rangeStart, rangeEnd);
   const linkedProjects = new Set(items.map((item) => item.project_case_id).filter(Boolean));
   const scheduledDays = items.reduce((sum, item) => sum + daysBetween(item.planned_start_date, item.planned_end_date), 0);
+  const actualHours = items.reduce((sum, item) => sum + Number(item.actual_hours ?? 0), 0);
   const months = Array.from(new Set([plan.plan_month, ...monthOptions.map((item) => item.plan_month)]));
+  const analysis = getProductionPlanAnalysis(user, plan, filters, rangeStart, rangeEnd, items);
   return {
     plan,
     dates,
@@ -1457,14 +2133,16 @@ export function getProductionPlanBoard(user: CurrentUser, filters: ProductionPla
       linked_project_count: linkedProjects.size,
       scheduled_days: scheduledDays,
       completed_count: items.filter((item) => Number(item.progress ?? 0) >= 100 || item.status === 'completed').length,
-      backlog_count: backlogItems.length
+      backlog_count: backlogItems.length,
+      actual_hours: Math.round(actualHours * 10) / 10
     },
     filters: {
       departments,
       teams,
       projects,
       months
-    }
+    },
+    analysis
   };
 }
 
@@ -1550,6 +2228,524 @@ export function deleteProductionPlanItem(user: CurrentUser, itemId: string) {
   assertCanEditProductionPlanDepartment(user, current.department_id);
   db.prepare('DELETE FROM production_plan_item WHERE id = ?').run(itemId);
   return { ok: true };
+}
+
+export function getProductionPlanItemDetails(user: CurrentUser, itemId: string) {
+  const item = getProductionPlanItemForAccess(itemId);
+  assertCanReadProductionPlanItem(user, item);
+
+  const detail = db
+    .prepare(
+      `SELECT ppi.*, pp.department_id, d.name as department_name,
+              pc.name as project_case_name, ci.name as case_item_name,
+              ct.name as task_name, tm.name as assigned_team_name,
+              COALESCE(wla.actual_hours, 0) as actual_hours,
+              COALESCE(wla.actual_employee_count, 0) as actual_employee_count,
+              COALESCE(wla.work_log_count, 0) as work_log_count,
+              wla.actual_quantity,
+              wla.actual_piece_count,
+              wla.actual_weight,
+              wla.actual_start_date,
+              wla.actual_end_date
+       FROM production_plan_item ppi
+       JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       JOIN department d ON d.id = pp.department_id
+       LEFT JOIN project_case pc ON pc.id = ppi.project_case_id
+       LEFT JOIN case_item ci ON ci.id = ppi.case_item_id
+       LEFT JOIN case_task ct ON ct.id = ppi.case_task_id
+       LEFT JOIN team tm ON tm.id = ppi.assigned_team_id
+       LEFT JOIN (
+         SELECT production_plan_item_id,
+                SUM(hours) as actual_hours,
+                COUNT(*) as work_log_count,
+                COUNT(DISTINCT actual_employee_id) as actual_employee_count,
+                SUM(quantity) as actual_quantity,
+                SUM(piece_count) as actual_piece_count,
+                SUM(weight) as actual_weight,
+                MIN(work_date) as actual_start_date,
+                MAX(work_date) as actual_end_date
+         FROM work_log_entry
+         WHERE production_plan_item_id = ?
+         GROUP BY production_plan_item_id
+       ) wla ON wla.production_plan_item_id = ppi.id
+       WHERE ppi.id = ?`
+    )
+    .get(itemId, itemId) as Record<string, unknown>;
+  if (!detail) {
+    const err = new Error('排期活动不存在');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+
+  const workLogs = db
+    .prepare(
+      `SELECT wl.*, pc.name as case_name, ci.name as item_name, ct.name as task_name,
+              emp.name as actual_employee_name, input.name as input_by_name, team.name as team_name,
+              CASE
+                WHEN wl.work_date < ppi.planned_start_date OR wl.work_date > ppi.planned_end_date THEN 'outside_plan'
+                ELSE 'scheduled'
+              END as schedule_link_status
+       FROM work_log_entry wl
+       JOIN production_plan_item ppi ON ppi.id = wl.production_plan_item_id
+       JOIN project_case pc ON pc.id = wl.project_case_id
+       LEFT JOIN case_item ci ON ci.id = wl.case_item_id
+       JOIN case_task ct ON ct.id = wl.case_task_id
+       LEFT JOIN employee emp ON emp.id = wl.actual_employee_id
+       LEFT JOIN employee input ON input.id = wl.input_by
+       LEFT JOIN team ON team.id = wl.team_id
+       WHERE wl.production_plan_item_id = ?
+       ORDER BY wl.work_date DESC, wl.id`
+    )
+    .all(itemId);
+
+  const dailyActuals = db
+    .prepare(
+      `SELECT work_date,
+              SUM(hours) as hours,
+              COUNT(*) as work_log_count,
+              COUNT(DISTINCT actual_employee_id) as employee_count,
+              SUM(quantity) as quantity,
+              SUM(piece_count) as piece_count,
+              SUM(weight) as weight
+       FROM work_log_entry
+       WHERE production_plan_item_id = ?
+       GROUP BY work_date
+       ORDER BY work_date`
+    )
+    .all(itemId);
+
+  const employeeActuals = db
+    .prepare(
+      `SELECT wl.actual_employee_id, emp.name as actual_employee_name,
+              SUM(wl.hours) as hours,
+              COUNT(*) as work_log_count,
+              SUM(wl.quantity) as quantity,
+              SUM(wl.piece_count) as piece_count,
+              SUM(wl.weight) as weight,
+              MIN(wl.work_date) as first_work_date,
+              MAX(wl.work_date) as last_work_date
+       FROM work_log_entry wl
+       LEFT JOIN employee emp ON emp.id = wl.actual_employee_id
+       WHERE wl.production_plan_item_id = ?
+       GROUP BY wl.actual_employee_id, emp.name
+       ORDER BY hours DESC, emp.name`
+    )
+    .all(itemId);
+
+  const plannedDays = daysBetween(String(detail.planned_start_date), String(detail.planned_end_date));
+  const outsidePlanCount = workLogs.filter((row) => (row as { schedule_link_status?: string }).schedule_link_status === 'outside_plan').length;
+
+  return {
+    item: {
+      ...detail,
+      duration_days: plannedDays,
+      effective_status: productionPlanStatus(detail as ProductionPlanItemRow)
+    },
+    summary: {
+      planned_days: plannedDays,
+      actual_hours: Number(detail.actual_hours ?? 0),
+      work_log_count: Number(detail.work_log_count ?? 0),
+      actual_employee_count: Number(detail.actual_employee_count ?? 0),
+      outside_plan_count: outsidePlanCount,
+      actual_quantity: detail.actual_quantity ?? null,
+      actual_piece_count: detail.actual_piece_count ?? null,
+      actual_weight: detail.actual_weight ?? null
+    },
+    daily_actuals: dailyActuals,
+    employee_actuals: employeeActuals,
+    work_logs: workLogs
+  };
+}
+
+export function getWorkLogPlanItems(user: CurrentUser, filters: WorkLogPlanItemFilters) {
+  if (!canManageProjects(user) && user.permission_level !== 'editor') return [];
+  if (filters.work_date) validateScheduleDates(filters.work_date, filters.work_date);
+  if (filters.project_case_id) assertCanReadCase(user, filters.project_case_id);
+
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (filters.work_date) {
+    where.push('ppi.planned_start_date <= ? AND ppi.planned_end_date >= ?');
+    params.push(filters.work_date, filters.work_date);
+  }
+  if (filters.team_id) {
+    where.push('ppi.assigned_team_id = ?');
+    params.push(filters.team_id);
+  }
+  if (filters.project_case_id) {
+    where.push('ppi.project_case_id = ?');
+    params.push(filters.project_case_id);
+  }
+  if (filters.department_id) {
+    where.push('pp.department_id = ?');
+    params.push(filters.department_id);
+  }
+  if (!canManageProjects(user)) {
+    const employee = db.prepare('SELECT department_id FROM employee WHERE id = ?').get(user.id) as { department_id: string | null } | undefined;
+    where.push(
+      `(ppi.assigned_team_id IN (SELECT id FROM team WHERE leader_id = ?)
+        OR ct.assignee_id = ?
+        OR pp.department_id = ?)`
+    );
+    params.push(user.id, user.id, employee?.department_id ?? '');
+  }
+  const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+
+  return db
+    .prepare(
+      `SELECT ppi.*, pp.department_id, d.name as department_name,
+              pc.name as project_case_name, ci.name as case_item_name,
+              ct.name as task_name, tm.name as assigned_team_name,
+              COALESCE(wla.actual_hours, 0) as actual_hours,
+              COALESCE(wla.work_log_count, 0) as work_log_count,
+              COALESCE(wla.actual_employee_count, 0) as actual_employee_count
+       FROM production_plan_item ppi
+       JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       JOIN department d ON d.id = pp.department_id
+       LEFT JOIN project_case pc ON pc.id = ppi.project_case_id
+       LEFT JOIN case_item ci ON ci.id = ppi.case_item_id
+       LEFT JOIN case_task ct ON ct.id = ppi.case_task_id
+       LEFT JOIN team tm ON tm.id = ppi.assigned_team_id
+       LEFT JOIN (
+         SELECT production_plan_item_id,
+                SUM(hours) as actual_hours,
+                COUNT(*) as work_log_count,
+                COUNT(DISTINCT actual_employee_id) as actual_employee_count
+         FROM work_log_entry
+         WHERE production_plan_item_id IS NOT NULL
+         GROUP BY production_plan_item_id
+       ) wla ON wla.production_plan_item_id = ppi.id
+       ${whereSql}
+       ORDER BY ppi.planned_start_date, pp.department_id, ppi.sort_order, ppi.id
+       LIMIT 200`
+    )
+    .all(...params);
+}
+
+export function createWorkLogEntry(user: CurrentUser, input: WorkLogInput) {
+  validateScheduleDates(input.work_date, input.work_date);
+  validateEmployee(input.actual_employee_id);
+
+  const task = db
+    .prepare(
+      `SELECT id, project_case_id, case_item_id, owner_department_id, assignee_id, team_id
+       FROM case_task
+       WHERE id = ?`
+    )
+    .get(input.case_task_id) as WorkLogTaskRow | undefined;
+  if (!task) {
+    const err = new Error('任务不存在');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+
+  let subtask: { id: string; case_task_id: string; team_id: string | null } | null = null;
+  if (input.case_subtask_id) {
+    subtask = (db.prepare('SELECT id, case_task_id, team_id FROM case_subtask WHERE id = ?').get(input.case_subtask_id) as
+      | { id: string; case_task_id: string; team_id: string | null }
+      | undefined) ?? null;
+    if (!subtask) {
+      const err = new Error('工序不存在');
+      err.name = 'NOT_FOUND';
+      throw err;
+    }
+    if (subtask.case_task_id !== task.id) {
+      const err = new Error('工序不属于所选任务');
+      err.name = 'VALIDATION_ERROR';
+      throw err;
+    }
+  }
+
+  const requestedTeamId = input.team_id ?? subtask?.team_id ?? task.team_id ?? null;
+  const planItem = resolveProductionPlanItemForWorkLog(input.production_plan_item_id, task, requestedTeamId, input.work_date);
+  const effectiveTeamId = input.team_id ?? planItem?.assigned_team_id ?? subtask?.team_id ?? task.team_id ?? null;
+  validateTeam(effectiveTeamId);
+  assertCanCreateWorkLogForTask(user, task, effectiveTeamId, planItem?.department_id ?? null);
+
+  db.prepare(
+    `INSERT INTO work_log_entry
+     (id, project_case_id, case_item_id, case_task_id, case_subtask_id, production_plan_item_id,
+      actual_employee_id, input_by, team_id, work_date, hours, work_content, output_note,
+      quantity, piece_count, weight, unit, record_status)
+     VALUES (@id, @project_case_id, @case_item_id, @case_task_id, @case_subtask_id, @production_plan_item_id,
+      @actual_employee_id, @input_by, @team_id, @work_date, @hours, @work_content, @output_note,
+      @quantity, @piece_count, @weight, @unit, 'submitted')`
+  ).run({
+    id: makeId('WL'),
+    project_case_id: task.project_case_id,
+    case_item_id: input.case_item_id ?? task.case_item_id ?? null,
+    case_task_id: task.id,
+    case_subtask_id: input.case_subtask_id ?? null,
+    production_plan_item_id: planItem?.id ?? null,
+    actual_employee_id: input.actual_employee_id,
+    input_by: user.id,
+    team_id: effectiveTeamId,
+    work_date: input.work_date,
+    hours: input.hours,
+    work_content: input.work_content,
+    output_note: input.output_note ?? '',
+    quantity: input.quantity ?? null,
+    piece_count: input.piece_count ?? null,
+    weight: input.weight ?? null,
+    unit: input.unit ?? ''
+  });
+
+  return { ok: true, production_plan_item_id: planItem?.id ?? null };
+}
+
+function resolveProductionPlanItemForWorkLog(
+  productionPlanItemId: string | null | undefined,
+  task: WorkLogTaskRow,
+  teamId: string | null,
+  workDate: string
+) {
+  if (productionPlanItemId) {
+    const item = getProductionPlanItemForWorkLog(productionPlanItemId);
+    assertProductionPlanItemMatchesTask(item, task);
+    return item;
+  }
+  return findSingleMatchingProductionPlanItem(task.id, teamId, workDate);
+}
+
+function getProductionPlanItemForWorkLog(itemId: string) {
+  const item = db
+    .prepare(
+      `SELECT ppi.id, ppi.project_case_id, ppi.case_item_id, ppi.case_task_id,
+              ppi.planned_start_date, ppi.planned_end_date, ppi.assigned_team_id,
+              pp.department_id
+       FROM production_plan_item ppi
+       JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       WHERE ppi.id = ?`
+    )
+    .get(itemId) as WorkLogPlanItemRow | undefined;
+  if (!item) {
+    const err = new Error('排期活动不存在');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+  return item;
+}
+
+function findSingleMatchingProductionPlanItem(taskId: string, teamId: string | null, workDate: string) {
+  const matches = db
+    .prepare(
+      `SELECT ppi.id, ppi.project_case_id, ppi.case_item_id, ppi.case_task_id,
+              ppi.planned_start_date, ppi.planned_end_date, ppi.assigned_team_id,
+              pp.department_id
+       FROM production_plan_item ppi
+       JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       WHERE ppi.case_task_id = ?
+         AND ppi.planned_start_date <= ?
+         AND ppi.planned_end_date >= ?
+         AND (? IS NULL OR ppi.assigned_team_id = ? OR ppi.assigned_team_id IS NULL)
+       ORDER BY
+         CASE
+           WHEN ppi.assigned_team_id = ? THEN 0
+           WHEN ppi.assigned_team_id IS NULL THEN 1
+           ELSE 2
+         END,
+         ppi.planned_start_date,
+         ppi.id
+       LIMIT 2`
+    )
+    .all(taskId, workDate, workDate, teamId, teamId, teamId) as WorkLogPlanItemRow[];
+  if (matches.length !== 1) return null;
+  return matches[0];
+}
+
+function assertProductionPlanItemMatchesTask(item: WorkLogPlanItemRow, task: WorkLogTaskRow) {
+  if (item.case_task_id !== task.id || item.project_case_id !== task.project_case_id || (item.case_item_id ?? null) !== (task.case_item_id ?? null)) {
+    const err = new Error('排期活动与日报任务不一致');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+}
+
+function assertCanCreateWorkLogForTask(user: CurrentUser, task: WorkLogTaskRow, teamId: string | null, planDepartmentId: string | null) {
+  if (canManageProjects(user)) return;
+  if (user.permission_level !== 'editor') {
+    const err = new Error('当前用户不能录入日报');
+    err.name = 'PERMISSION_DENIED';
+    throw err;
+  }
+  if (task.assignee_id === user.id) return;
+  if (teamId) {
+    const ledTeam = db.prepare('SELECT 1 FROM team WHERE id = ? AND leader_id = ?').get(teamId, user.id);
+    if (ledTeam) return;
+  }
+  const employee = db.prepare('SELECT department_id FROM employee WHERE id = ?').get(user.id) as { department_id: string | null } | undefined;
+  if (employee?.department_id && (employee.department_id === task.owner_department_id || employee.department_id === planDepartmentId)) return;
+
+  const err = new Error('当前用户不能为该任务录入日报');
+  err.name = 'PERMISSION_DENIED';
+  throw err;
+}
+
+function getProductionPlanAnalysis(
+  user: CurrentUser,
+  plan: ProductionPlanRow,
+  filters: ProductionPlanFilters,
+  rangeStart: string,
+  rangeEnd: string,
+  items: ProductionPlanItemRow[]
+) {
+  const today = nowIso().slice(0, 10);
+  const dueCutoff = rangeEnd < today ? rangeEnd : today;
+  const noWorkItems = items
+    .filter((item) => Number(item.actual_hours ?? 0) <= 0 && item.planned_start_date <= dueCutoff)
+    .map((item) => ({
+      ...item,
+      duration_days: daysBetween(item.planned_start_date, item.planned_end_date),
+      effective_status: item.planned_end_date < today ? 'delayed' : productionPlanStatus(item)
+    }));
+
+  const departmentId = filters.department_id ?? plan.department_id;
+  const unscheduledWorkLogs = getProductionPlanWorkLogAnomalies(user, filters, departmentId, rangeStart, rangeEnd, 'unscheduled');
+  const outsidePlanWorkLogs = getProductionPlanWorkLogAnomalies(user, filters, departmentId, rangeStart, rangeEnd, 'outside_plan');
+  const teamSummaries = getProductionPlanWorkLogTeamSummaries(user, filters, departmentId, rangeStart, rangeEnd);
+  const employeeSummaries = getProductionPlanWorkLogEmployeeSummaries(user, filters, departmentId, rangeStart, rangeEnd);
+
+  return {
+    summary: {
+      not_reported_count: noWorkItems.length,
+      unscheduled_count: unscheduledWorkLogs.length,
+      outside_plan_count: outsidePlanWorkLogs.length,
+      team_count: teamSummaries.length,
+      employee_count: employeeSummaries.length
+    },
+    no_work_plan_items: noWorkItems.slice(0, 40),
+    unscheduled_work_logs: unscheduledWorkLogs,
+    outside_plan_work_logs: outsidePlanWorkLogs,
+    team_summaries: teamSummaries,
+    employee_summaries: employeeSummaries
+  };
+}
+
+function getProductionPlanWorkLogAnomalies(
+  user: CurrentUser,
+  filters: ProductionPlanFilters,
+  departmentId: string,
+  rangeStart: string,
+  rangeEnd: string,
+  type: 'unscheduled' | 'outside_plan'
+) {
+  const { where, params } = buildProductionPlanWorkLogWhere(user, filters, departmentId, rangeStart, rangeEnd);
+  if (type === 'unscheduled') {
+    where.push('wl.production_plan_item_id IS NULL');
+  } else {
+    where.push(`wl.production_plan_item_id IS NOT NULL`);
+    where.push(`(wl.work_date < ppi.planned_start_date OR wl.work_date > ppi.planned_end_date)`);
+  }
+
+  return db
+    .prepare(
+      `SELECT wl.*, pc.name as case_name, ci.name as item_name, ct.name as task_name,
+              emp.name as actual_employee_name, team.name as team_name,
+              ppi.name as production_plan_item_name,
+              ppi.planned_start_date as plan_start_date,
+              ppi.planned_end_date as plan_end_date,
+              CASE
+                WHEN wl.production_plan_item_id IS NULL THEN 'unscheduled'
+                WHEN wl.work_date < ppi.planned_start_date OR wl.work_date > ppi.planned_end_date THEN 'outside_plan'
+                ELSE 'scheduled'
+              END as schedule_link_status
+       FROM work_log_entry wl
+       JOIN project_case pc ON pc.id = wl.project_case_id
+       LEFT JOIN case_item ci ON ci.id = wl.case_item_id
+       JOIN case_task ct ON ct.id = wl.case_task_id
+       LEFT JOIN employee emp ON emp.id = wl.actual_employee_id
+       LEFT JOIN team ON team.id = wl.team_id
+       LEFT JOIN production_plan_item ppi ON ppi.id = wl.production_plan_item_id
+       LEFT JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY wl.work_date DESC, wl.id
+       LIMIT 80`
+    )
+    .all(...params);
+}
+
+function getProductionPlanWorkLogTeamSummaries(user: CurrentUser, filters: ProductionPlanFilters, departmentId: string, rangeStart: string, rangeEnd: string) {
+  const { where, params } = buildProductionPlanWorkLogWhere(user, filters, departmentId, rangeStart, rangeEnd);
+  return db
+    .prepare(
+      `SELECT wl.team_id, COALESCE(team.name, '未分配') as team_name,
+              SUM(wl.hours) as hours,
+              COUNT(*) as work_log_count,
+              COUNT(DISTINCT wl.actual_employee_id) as employee_count,
+              SUM(CASE WHEN wl.production_plan_item_id IS NULL THEN wl.hours ELSE 0 END) as unscheduled_hours,
+              SUM(CASE WHEN wl.production_plan_item_id IS NOT NULL
+                        AND (wl.work_date < ppi.planned_start_date OR wl.work_date > ppi.planned_end_date)
+                       THEN wl.hours ELSE 0 END) as outside_plan_hours
+       FROM work_log_entry wl
+       JOIN case_task ct ON ct.id = wl.case_task_id
+       LEFT JOIN team ON team.id = wl.team_id
+       LEFT JOIN production_plan_item ppi ON ppi.id = wl.production_plan_item_id
+       LEFT JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       WHERE ${where.join(' AND ')}
+       GROUP BY wl.team_id, team.name
+       ORDER BY hours DESC, team.name
+       LIMIT 40`
+    )
+    .all(...params);
+}
+
+function getProductionPlanWorkLogEmployeeSummaries(user: CurrentUser, filters: ProductionPlanFilters, departmentId: string, rangeStart: string, rangeEnd: string) {
+  const { where, params } = buildProductionPlanWorkLogWhere(user, filters, departmentId, rangeStart, rangeEnd);
+  return db
+    .prepare(
+      `SELECT wl.actual_employee_id, emp.name as actual_employee_name,
+              SUM(wl.hours) as hours,
+              COUNT(*) as work_log_count,
+              COUNT(DISTINCT wl.project_case_id) as project_count,
+              SUM(wl.quantity) as quantity,
+              SUM(wl.piece_count) as piece_count,
+              SUM(wl.weight) as weight,
+              MIN(wl.work_date) as first_work_date,
+              MAX(wl.work_date) as last_work_date
+       FROM work_log_entry wl
+       JOIN case_task ct ON ct.id = wl.case_task_id
+       LEFT JOIN employee emp ON emp.id = wl.actual_employee_id
+       LEFT JOIN production_plan_item ppi ON ppi.id = wl.production_plan_item_id
+       LEFT JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       WHERE ${where.join(' AND ')}
+       GROUP BY wl.actual_employee_id, emp.name
+       ORDER BY hours DESC, emp.name
+       LIMIT 40`
+    )
+    .all(...params);
+}
+
+function buildProductionPlanWorkLogWhere(
+  user: CurrentUser,
+  filters: ProductionPlanFilters,
+  departmentId: string,
+  rangeStart: string,
+  rangeEnd: string
+) {
+  const where = ['wl.work_date >= ?', 'wl.work_date <= ?'];
+  const params: unknown[] = [rangeStart, rangeEnd];
+  where.push('(pp.department_id = ? OR (wl.production_plan_item_id IS NULL AND ct.owner_department_id = ?))');
+  params.push(departmentId, departmentId);
+  if (filters.project_case_id) {
+    where.push('wl.project_case_id = ?');
+    params.push(filters.project_case_id);
+  }
+  if (filters.team_id) {
+    where.push('wl.team_id = ?');
+    params.push(filters.team_id);
+  }
+  if (!canManageProjects(user)) {
+    const employee = db.prepare('SELECT department_id FROM employee WHERE id = ?').get(user.id) as { department_id: string | null } | undefined;
+    where.push(
+      `(wl.project_case_id IN (SELECT project_case_id FROM project_case_member WHERE user_id = ?)
+        OR wl.team_id IN (SELECT id FROM team WHERE leader_id = ?)
+        OR ct.assignee_id = ?
+        OR ct.owner_department_id = ?
+        OR pp.department_id = ?)`
+    );
+    params.push(user.id, user.id, user.id, employee?.department_id ?? '', employee?.department_id ?? '');
+  }
+  return { where, params };
 }
 
 function getProductionPlanBacklog(user: CurrentUser, plan: ProductionPlanRow, filters: ProductionPlanFilters) {
@@ -1644,6 +2840,7 @@ function daysBetween(startDate: string, endDate: string) {
 
 function productionPlanStatus(item: ProductionPlanItemRow) {
   if (Number(item.progress ?? 0) >= 100 || item.status === 'completed') return 'completed';
+  if (Number(item.actual_hours ?? 0) > 0 && item.status === 'planned') return 'in_progress';
   return item.status || 'planned';
 }
 
@@ -1711,6 +2908,46 @@ function getProductionPlanItemForEdit(itemId: string) {
     throw err;
   }
   return item;
+}
+
+function getProductionPlanItemForAccess(itemId: string) {
+  const item = db
+    .prepare(
+      `SELECT ppi.id, ppi.project_case_id, ppi.case_item_id, ppi.case_task_id,
+              ppi.assigned_team_id, pp.department_id, ct.assignee_id as task_assignee_id
+       FROM production_plan_item ppi
+       JOIN production_plan pp ON pp.id = ppi.production_plan_id
+       LEFT JOIN case_task ct ON ct.id = ppi.case_task_id
+       WHERE ppi.id = ?`
+    )
+    .get(itemId) as ProductionPlanItemAccessRow | undefined;
+  if (!item) {
+    const err = new Error('排期活动不存在');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+  return item;
+}
+
+function assertCanReadProductionPlanItem(user: CurrentUser, item: ProductionPlanItemAccessRow) {
+  if (canManageProjects(user)) return;
+  if (item.project_case_id) {
+    const membership = db
+      .prepare('SELECT 1 FROM project_case_member WHERE project_case_id = ? AND user_id = ?')
+      .get(item.project_case_id, user.id);
+    if (membership) return;
+  }
+  if (item.task_assignee_id === user.id) return;
+  if (item.assigned_team_id) {
+    const ledTeam = db.prepare('SELECT 1 FROM team WHERE id = ? AND leader_id = ?').get(item.assigned_team_id, user.id);
+    if (ledTeam) return;
+  }
+  const employee = db.prepare('SELECT department_id FROM employee WHERE id = ?').get(user.id) as { department_id: string | null } | undefined;
+  if (employee?.department_id === item.department_id) return;
+
+  const err = new Error('当前用户不能查看该排期活动');
+  err.name = 'PERMISSION_DENIED';
+  throw err;
 }
 
 function ensureProductionPlan(departmentId: string, month: string) {

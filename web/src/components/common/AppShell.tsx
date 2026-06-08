@@ -13,7 +13,7 @@ const menuItems = [
   { key: '/work-logs', icon: <FormOutlined />, label: '日报工时' },
   { key: '/exceptions', icon: <ExceptionOutlined />, label: '异常协同' },
   { key: '/imports', icon: <FileExcelOutlined />, label: 'Excel 导入' },
-  { key: '/reports', icon: <BarChartOutlined />, label: '统计月报' },
+  { key: '/reports', icon: <BarChartOutlined />, label: '统计报表' },
   { key: '/settings/templates', icon: <SettingOutlined />, label: '后台配置' }
 ];
 

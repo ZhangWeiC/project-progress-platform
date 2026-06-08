@@ -260,6 +260,7 @@ export function initializeDatabase() {
       case_item_id TEXT,
       case_task_id TEXT NOT NULL,
       case_subtask_id TEXT,
+      production_plan_item_id TEXT,
       actual_employee_id TEXT NOT NULL,
       input_by TEXT NOT NULL,
       team_id TEXT,
@@ -276,6 +277,7 @@ export function initializeDatabase() {
       FOREIGN KEY (case_item_id) REFERENCES case_item(id),
       FOREIGN KEY (case_task_id) REFERENCES case_task(id),
       FOREIGN KEY (case_subtask_id) REFERENCES case_subtask(id),
+      FOREIGN KEY (production_plan_item_id) REFERENCES production_plan_item(id),
       FOREIGN KEY (actual_employee_id) REFERENCES employee(id),
       FOREIGN KEY (input_by) REFERENCES employee(id),
       FOREIGN KEY (team_id) REFERENCES team(id)
@@ -390,6 +392,7 @@ export function initializeDatabase() {
   seedCredentials();
   migrateWorkflowModel();
   seedProductionPlans();
+  migrateWorkLogProductionPlanLink();
 }
 
 function migratePermissionModel() {
@@ -400,6 +403,53 @@ function migratePermissionModel() {
     db.prepare("UPDATE employee SET permission_level = 'manager' WHERE role IN ('admin', 'business_owner')").run();
     db.prepare("UPDATE employee SET permission_level = 'editor' WHERE role IN ('design_owner', 'material_owner', 'quality_owner', 'team_leader')").run();
   }
+}
+
+function migrateWorkLogProductionPlanLink() {
+  const columns = db.prepare('PRAGMA table_info(work_log_entry)').all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === 'production_plan_item_id')) {
+    db.prepare('ALTER TABLE work_log_entry ADD COLUMN production_plan_item_id TEXT').run();
+  }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_work_log_plan_item ON work_log_entry(production_plan_item_id);
+    CREATE INDEX IF NOT EXISTS idx_work_log_date_team ON work_log_entry(work_date, team_id);
+  `);
+
+  const logs = db
+    .prepare(
+      `SELECT id, case_task_id, team_id, work_date
+       FROM work_log_entry
+       WHERE production_plan_item_id IS NULL`
+    )
+    .all() as Array<{ id: string; case_task_id: string; team_id: string | null; work_date: string }>;
+  if (logs.length === 0) return;
+
+  const findMatches = db.prepare(
+    `SELECT id
+     FROM production_plan_item
+     WHERE case_task_id = ?
+       AND planned_start_date <= ?
+       AND planned_end_date >= ?
+       AND (? IS NULL OR assigned_team_id = ? OR assigned_team_id IS NULL)
+     ORDER BY
+       CASE
+         WHEN assigned_team_id = ? THEN 0
+         WHEN assigned_team_id IS NULL THEN 1
+         ELSE 2
+       END,
+       planned_start_date,
+       id
+     LIMIT 2`
+  );
+  const updateLog = db.prepare('UPDATE work_log_entry SET production_plan_item_id = ? WHERE id = ?');
+  const tx = db.transaction((rows: typeof logs) => {
+    for (const log of rows) {
+      const matches = findMatches.all(log.case_task_id, log.work_date, log.work_date, log.team_id, log.team_id, log.team_id) as Array<{ id: string }>;
+      if (matches.length === 1) updateLog.run(matches[0].id, log.id);
+    }
+  });
+  tx(logs);
 }
 
 function insertMany(table: string, rows: Array<Record<string, unknown>>) {

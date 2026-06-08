@@ -8,14 +8,18 @@ import {
   canManageProjects,
   createProductionPlanItem,
   createProjectCase,
+  createWorkLogEntry,
   deleteProductionPlanItem,
   deleteProjectCase,
   getAllMatrix,
   getCurrentUser,
   getMatrix,
   getProductionPlanBoard,
+  getProductionPlanItemDetails,
   getProjectCaseManageProfile,
   getTaskDetails,
+  getWorkSummaryReport,
+  getWorkLogPlanItems,
   updateProductionPlanItem,
   updateDeliveryInfo,
   updateProgress,
@@ -282,6 +286,12 @@ app.delete('/api/production-plans/items/:id', async (request) => {
   return deleteProductionPlanItem(user, id);
 });
 
+app.get('/api/production-plans/items/:id/details', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  return getProductionPlanItemDetails(user, id);
+});
+
 app.get('/api/tasks/:id', async (request) => {
   const user = getCurrentUser(request.headers);
   const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -314,11 +324,36 @@ app.patch('/api/subtasks/:id/progress', async (request) => {
   return updateProgress('subtask', id, body.progress, user, body.reason);
 });
 
+app.get('/api/work-log-plan-items', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const query = z.object({
+    work_date: z.string().optional(),
+    team_id: z.string().optional(),
+    project_case_id: z.string().optional(),
+    department_id: z.string().optional()
+  }).parse(request.query);
+  return getWorkLogPlanItems(user, query);
+});
+
+app.get('/api/reports/work-summary', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const query = z.object({
+    period: z.enum(['week', 'month']).optional(),
+    start_date: z.string().optional(),
+    end_date: z.string().optional(),
+    department_id: z.string().optional(),
+    team_id: z.string().optional(),
+    project_case_id: z.string().optional()
+  }).parse(request.query);
+  return getWorkSummaryReport(user, query);
+});
+
 app.get('/api/work-logs', async (request) => {
   const user = getCurrentUser(request.headers);
   const query = z.object({
     project_case_id: z.string().optional(),
-    case_task_id: z.string().optional()
+    case_task_id: z.string().optional(),
+    production_plan_item_id: z.string().optional()
   }).parse(request.query);
   const where: string[] = [];
   const params: unknown[] = [];
@@ -331,14 +366,34 @@ app.get('/api/work-logs', async (request) => {
     where.push('wl.case_task_id = ?');
     params.push(query.case_task_id);
   }
+  if (query.production_plan_item_id) {
+    where.push('wl.production_plan_item_id = ?');
+    params.push(query.production_plan_item_id);
+  }
   if (!canManageProjects(user)) {
-    where.push('wl.project_case_id IN (SELECT project_case_id FROM project_case_member WHERE user_id = ?)');
-    params.push(user.id);
+    const employee = db.prepare('SELECT department_id FROM employee WHERE id = ?').get(user.id) as { department_id: string | null } | undefined;
+    where.push(
+      `(wl.project_case_id IN (SELECT project_case_id FROM project_case_member WHERE user_id = ?)
+        OR wl.team_id IN (SELECT id FROM team WHERE leader_id = ?)
+        OR wl.case_task_id IN (
+          SELECT id FROM case_task
+          WHERE assignee_id = ? OR owner_department_id = ?
+        ))`
+    );
+    params.push(user.id, user.id, user.id, employee?.department_id ?? '');
   }
   const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
   return db.prepare(
     `SELECT wl.*, pc.name as case_name, ci.name as item_name, t.name as task_name, s.name as subtask_name,
-            emp.name as actual_employee_name, input.name as input_by_name, team.name as team_name
+            emp.name as actual_employee_name, input.name as input_by_name, team.name as team_name,
+            ppi.name as production_plan_item_name,
+            ppi.planned_start_date as plan_start_date,
+            ppi.planned_end_date as plan_end_date,
+            CASE
+              WHEN wl.production_plan_item_id IS NULL THEN 'unscheduled'
+              WHEN wl.work_date < ppi.planned_start_date OR wl.work_date > ppi.planned_end_date THEN 'outside_plan'
+              ELSE 'scheduled'
+            END as schedule_link_status
      FROM work_log_entry wl
      JOIN project_case pc ON pc.id = wl.project_case_id
      LEFT JOIN case_item ci ON ci.id = wl.case_item_id
@@ -347,16 +402,18 @@ app.get('/api/work-logs', async (request) => {
      LEFT JOIN employee emp ON emp.id = wl.actual_employee_id
      LEFT JOIN employee input ON input.id = wl.input_by
      LEFT JOIN team ON team.id = wl.team_id
+     LEFT JOIN production_plan_item ppi ON ppi.id = wl.production_plan_item_id
      ${whereSql}
      ORDER BY wl.work_date DESC`
   ).all(...params);
 });
 
 const workLogBody = z.object({
-  project_case_id: z.string(),
+  project_case_id: z.string().optional(),
   case_item_id: z.string().nullable().optional(),
   case_task_id: z.string(),
   case_subtask_id: z.string().nullable().optional(),
+  production_plan_item_id: z.string().nullable().optional(),
   actual_employee_id: z.string(),
   team_id: z.string().nullable().optional(),
   work_date: z.string(),
@@ -372,34 +429,7 @@ const workLogBody = z.object({
 app.post('/api/work-logs', async (request) => {
   const user = getCurrentUser(request.headers);
   const body = workLogBody.parse(request.body);
-  const task = db.prepare('SELECT project_case_id, case_item_id, team_id FROM case_task WHERE id = ?').get(body.case_task_id) as
-    | { project_case_id: string; case_item_id: string | null; team_id: string | null }
-    | undefined;
-  if (!task) {
-    const err = new Error('任务不存在');
-    err.name = 'NOT_FOUND';
-    throw err;
-  }
-  assertCanReadCase(user, task.project_case_id);
-  db.prepare(
-    `INSERT INTO work_log_entry
-     (id, project_case_id, case_item_id, case_task_id, case_subtask_id, actual_employee_id, input_by, team_id, work_date, hours, work_content, output_note, quantity, piece_count, weight, unit, record_status)
-     VALUES (@id, @project_case_id, @case_item_id, @case_task_id, @case_subtask_id, @actual_employee_id, @input_by, @team_id, @work_date, @hours, @work_content, @output_note, @quantity, @piece_count, @weight, @unit, 'submitted')`
-  ).run({
-    id: makeId('WL'),
-    ...body,
-    project_case_id: task.project_case_id,
-    case_item_id: body.case_item_id ?? task.case_item_id ?? null,
-    case_subtask_id: body.case_subtask_id ?? null,
-    input_by: user.id,
-    team_id: body.team_id ?? task.team_id,
-    output_note: body.output_note ?? '',
-    quantity: body.quantity ?? null,
-    piece_count: body.piece_count ?? null,
-    weight: body.weight ?? null,
-    unit: body.unit ?? ''
-  });
-  return { ok: true };
+  return createWorkLogEntry(user, body);
 });
 
 app.get('/api/exceptions', async (request) => {

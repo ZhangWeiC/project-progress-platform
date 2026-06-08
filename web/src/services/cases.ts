@@ -1,5 +1,5 @@
 import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from './api';
-import type { ExceptionRecord, ImportTaskPreview, LookupResponse, MatrixResponse, ProjectCase, TaskDetails, WorkflowTemplate, WorkbenchResponse, WorkbenchTask, WorkLogEntry } from '../types';
+import type { ExceptionRecord, ImportTaskPreview, LookupResponse, MatrixResponse, ProjectCase, TaskDetails, WorkflowTemplate, WorkbenchResponse, WorkbenchTask, WorkLogEntry, WorkLogPlanItem } from '../types';
 
 export const fetchCases = () => apiGet<ProjectCase[]>('/api/cases');
 
@@ -57,6 +57,22 @@ export const createWorkLog = (payload: Partial<WorkLogEntry> & Record<string, un
   apiPost<{ ok: boolean }>('/api/work-logs', payload);
 
 export const fetchWorkLogs = () => apiGet<WorkLogEntry[]>('/api/work-logs');
+
+export type WorkLogPlanItemFilters = {
+  work_date?: string;
+  team_id?: string;
+  project_case_id?: string;
+  department_id?: string;
+};
+
+export const fetchWorkLogPlanItems = (filters: WorkLogPlanItemFilters) => {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) params.set(key, value);
+  }
+  const query = params.toString();
+  return apiGet<WorkLogPlanItem[]>(`/api/work-log-plan-items${query ? `?${query}` : ''}`);
+};
 
 export const fetchExceptions = () => apiGet<ExceptionRecord[]>('/api/exceptions');
 
