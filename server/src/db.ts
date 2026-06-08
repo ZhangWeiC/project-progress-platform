@@ -494,11 +494,12 @@ function addColumnIfMissing(table: string, column: string, definition: string) {
   db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
 }
 
+function shouldSeedDemoData() {
+  return process.env.SEED_DEMO_DATA === '1' || process.env.NODE_ENV !== 'production';
+}
+
 
 function seedDatabase() {
-  const existing = db.prepare('SELECT COUNT(*) as count FROM project_case').get() as { count: number };
-  if (existing.count > 0) return;
-
   insertMany('department', [
     { id: 'dept-business', name: '业务部' },
     { id: 'dept-design', name: '设计部' },
@@ -558,6 +559,9 @@ function seedDatabase() {
     { id: 'st-mutual-check', task_template_id: 'tt-inspection', name: '互检', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0 },
     { id: 'st-special-check', task_template_id: 'tt-inspection', name: '专检', sort_order: 30, progress_rule: 'manual', required: 1, skippable: 0 }
   ]);
+
+  const existing = db.prepare('SELECT COUNT(*) as count FROM project_case').get() as { count: number };
+  if (existing.count > 0 || !shouldSeedDemoData()) return;
 
   insertMany('project_case', [
     { id: 'CASE-202604-001', code: 'P-001', name: '惠增一标20M小箱梁中梁旧模板改造', category: '旧模板改造', customer_name: '', business_owner_id: 'user-zhang', design_owner_id: 'user-wei-li', estimated_weight: 15, weight_unit: 'T', status: 'completed', total_progress: 100, delivery_date: '2026-04-09', delivery_status: '已出货', source_sheet: '总表', source_row: 9, source_seq: 1 },
@@ -796,6 +800,8 @@ function seedLogsAndExceptions() {
 }
 
 function seedProductionPlans() {
+  if (!shouldSeedDemoData()) return;
+
   const existing = db.prepare('SELECT COUNT(*) as count FROM production_plan').get() as { count: number };
   if (existing.count > 0) return;
 
