@@ -333,6 +333,12 @@ export function deleteProjectCase(projectCaseId: string, user: CurrentUser) {
     db.prepare('DELETE FROM exception_record WHERE project_case_id = ?').run(projectCaseId);
     db.prepare('DELETE FROM work_log_entry WHERE project_case_id = ?').run(projectCaseId);
     db.prepare(
+      `DELETE FROM production_plan_item
+       WHERE project_case_id = ?
+          OR case_item_id IN (SELECT id FROM case_item WHERE project_case_id = ?)
+          OR case_task_id IN (SELECT id FROM case_task WHERE project_case_id = ?)`
+    ).run(projectCaseId, projectCaseId, projectCaseId);
+    db.prepare(
       `DELETE FROM progress_log
        WHERE (target_type = 'task' AND target_id IN (SELECT id FROM case_task WHERE project_case_id = ?))
           OR (target_type = 'subtask' AND target_id IN (
