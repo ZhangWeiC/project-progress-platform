@@ -64,9 +64,7 @@ export function SettingsPage() {
               />
             )
           },
-          { key: 'views', label: '视图配置', children: <ConfigTable rows={viewRows} /> },
-          { key: 'permissions', label: '权限配置', children: <ConfigTable rows={permissionRows} /> },
-          { key: 'dictionaries', label: '字典配置', children: <ConfigTable rows={dictionaryRows} /> }
+          { key: 'permissions', label: '权限配置', children: <PermissionTable /> }
         ]}
       />
     </Card>
@@ -252,42 +250,65 @@ function WorkflowTemplateTable({ rows, loading }: { rows: WorkflowStage[]; loadi
   );
 }
 
-type ConfigRow = {
+type PermissionRow = {
   key: string;
-  name: string;
+  role: string;
+  level: string;
   scope: string;
-  status: string;
-  updated_at: string;
+  permissions: string[];
 };
 
-function ConfigTable({ rows }: { rows: ConfigRow[] }) {
+function PermissionTable() {
   return (
-    <Table<ConfigRow>
+    <Table<PermissionRow>
       rowKey="key"
       size="small"
       pagination={false}
-      dataSource={rows}
+      dataSource={permissionRows}
       columns={[
-        { title: '名称', dataIndex: 'name' },
-        { title: '范围', dataIndex: 'scope', width: 180 },
-        { title: '状态', dataIndex: 'status', width: 100, render: (value) => <Tag color={value === 'active' ? 'green' : 'default'}>{value}</Tag> },
-        { title: '更新时间', dataIndex: 'updated_at', width: 160 }
+        { title: '角色', dataIndex: 'role', width: 120, render: (value) => <Typography.Text strong>{value}</Typography.Text> },
+        { title: '权限层级', dataIndex: 'level', width: 120, render: (value) => <Tag color={permissionLevelColor(value)}>{value}</Tag> },
+        { title: '可见范围', dataIndex: 'scope', width: 220 },
+        {
+          title: '权限说明',
+          dataIndex: 'permissions',
+          render: (permissions: string[]) => (
+            <Space size={[4, 4]} wrap>
+              {permissions.map((item) => <Tag key={item}>{item}</Tag>)}
+            </Space>
+          )
+        }
       ]}
     />
   );
 }
 
-const viewRows: ConfigRow[] = [
-  { key: 'default-matrix', name: '项目进度总览', scope: 'Web', status: 'active', updated_at: '2026-04-01' },
-  { key: 'mobile-workbench', name: '现场工作台', scope: 'H5', status: 'active', updated_at: '2026-04-01' }
+const permissionRows: PermissionRow[] = [
+  {
+    key: 'manager',
+    role: '可管理',
+    level: 'manager',
+    scope: '全部项目与后台数据',
+    permissions: ['增删项目', '编辑项目基础信息', '配置负责人', '查看全部进度', '同步飞书通讯录']
+  },
+  {
+    key: 'editor',
+    role: '可编辑',
+    level: 'editor',
+    scope: '自己负责的项目阶段、班组或部门',
+    permissions: ['编辑负责阶段进度', '录入日报工时', '处理相关异常', '查看相关项目']
+  },
+  {
+    key: 'viewer',
+    role: '可查看',
+    level: 'viewer',
+    scope: '与自己有关的项目',
+    permissions: ['查看项目进度', '查看任务详情', '查看相关异常']
+  }
 ];
 
-const permissionRows: ConfigRow[] = [
-  { key: 'case-member-read', name: '项目成员可见', scope: '项目', status: 'active', updated_at: '2026-04-01' },
-  { key: 'task-owner-write', name: '当前任务负责人可改', scope: '任务', status: 'active', updated_at: '2026-04-01' }
-];
-
-const dictionaryRows: ConfigRow[] = [
-  { key: 'exception-type', name: '异常类型', scope: '全局', status: 'active', updated_at: '2026-04-01' },
-  { key: 'quantity-unit', name: '数量单位', scope: '全局', status: 'active', updated_at: '2026-04-01' }
-];
+function permissionLevelColor(level: string) {
+  if (level === 'manager') return 'green';
+  if (level === 'editor') return 'blue';
+  return 'default';
+}
