@@ -109,10 +109,12 @@ type FeishuContactDepartment = {
   feishu_open_department_id?: string | null;
   employee_count: number;
   employees: FeishuContactEmployee[];
+  children?: FeishuContactDepartment[];
 };
 
 type FeishuContactsResponse = {
   departments: FeishuContactDepartment[];
+  flat_departments?: FeishuContactDepartment[];
   unassigned: FeishuContactEmployee[];
 };
 
@@ -180,7 +182,7 @@ function FeishuDepartmentTable({ contacts, loading, error }: { contacts?: Feishu
           expandedRowRender: (department) => (
             <EmployeeTable rows={department.employees} emptyText="该部门暂无人员" />
           ),
-          rowExpandable: (department) => department.employees.length > 0
+          rowExpandable: (department) => department.employees.length > 0 || Boolean(department.children?.length)
         }}
         columns={[
           { title: '部门', dataIndex: 'name', render: (value) => value || '未命名部门' },

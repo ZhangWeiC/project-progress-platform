@@ -84,6 +84,28 @@ type FeishuOAuthUser = {
   avatar?: { avatar_72?: string; avatar_240?: string; avatar_origin?: string };
 };
 
+type ContactDepartmentRow = {
+  id: string;
+  name: string;
+  parent_department_id: string | null;
+  feishu_open_department_id: string | null;
+  status: string | null;
+  employee_count: number;
+  employees: ContactEmployeeRow[];
+  children: ContactDepartmentRow[];
+};
+
+type ContactEmployeeRow = {
+  id: string;
+  name: string;
+  role: string;
+  department_id: string | null;
+  feishu_open_id: string | null;
+  is_active: number;
+  group_department_id: string | null;
+  is_primary: number | null;
+};
+
 export function getFeishuStatus() {
   const configured = Boolean(process.env.FEISHU_APP_ID && process.env.FEISHU_APP_SECRET && process.env.FEISHU_REDIRECT_URI);
   const lastSyncedAt = db.prepare('SELECT MAX(last_feishu_sync_at) as value FROM employee').get() as { value: string | null };
@@ -107,8 +129,8 @@ export function getFeishuContactsByDepartment() {
      LEFT JOIN employee_department ed ON ed.department_id = d.id
      WHERE d.status IS NULL OR d.status != 'deleted'
      GROUP BY d.id
-     ORDER BY d.name`
-  ).all() as Array<{ id: string; name: string; parent_department_id: string | null; feishu_open_department_id: string | null; status: string | null; employee_count: number }>;
+     ORDER BY COALESCE(d.parent_department_id, ''), d.name`
+  ).all() as Array<Omit<ContactDepartmentRow, 'employees' | 'children'>>;
 
   const employees = db.prepare(
     `SELECT e.id, e.name, e.role, e.department_id, e.feishu_open_id, e.is_active,
@@ -117,16 +139,27 @@ export function getFeishuContactsByDepartment() {
      LEFT JOIN employee_department ed ON ed.employee_id = e.id
      WHERE COALESCE(e.is_active, 1) = 1
      ORDER BY e.name`
-  ).all() as Array<{ id: string; name: string; role: string; department_id: string | null; feishu_open_id: string | null; is_active: number; group_department_id: string | null; is_primary: number | null }>;
+  ).all() as ContactEmployeeRow[];
 
-  const departmentRows = departments.map((department) => ({
-    ...department,
-    employees: employees.filter((employee) => (employee.group_department_id ?? employee.department_id) === department.id)
-  }));
+  const departmentRows: ContactDepartmentRow[] = departments.map((department) => {
+    return {
+      ...department,
+      employees: employees.filter((employee) => (employee.group_department_id ?? employee.department_id) === department.id),
+      children: []
+    };
+  });
+  const departmentMap = new Map(departmentRows.map((department) => [department.id, department]));
+  const roots: ContactDepartmentRow[] = [];
+  for (const department of departmentRows) {
+    const parent = department.parent_department_id ? departmentMap.get(department.parent_department_id) : undefined;
+    if (parent) parent.children.push(department);
+    else roots.push(department);
+  }
   const assignedIds = new Set(departmentRows.flatMap((department) => department.employees.map((employee) => employee.id)));
   const unassigned = employees.filter((employee) => !assignedIds.has(employee.id));
   return {
-    departments: departmentRows,
+    departments: roots,
+    flat_departments: departmentRows,
     unassigned
   };
 }
@@ -183,10 +216,11 @@ export async function syncFeishuContacts(currentUser: CurrentUser): Promise<Sync
 
   for (const department of departments) {
     const result = upsertDepartment(department, startedAt);
-    departmentIdMap.set(feishuDepartmentKey(department), result.id);
+    setDepartmentMapKeys(departmentIdMap, department, result.id);
     if (result.created) stats.departments_created += 1;
     else stats.departments_updated += 1;
   }
+  syncDepartmentParents(departments, departmentIdMap, startedAt);
 
   const seenEmployeeIds = new Set<string>();
   const syncDepartmentIds = departments.length > 0 ? departments.map(feishuDepartmentKey) : [FEISHU_ROOT_DEPARTMENT_ID];
@@ -320,23 +354,36 @@ function upsertDepartment(department: FeishuDepartment, syncedAt: string) {
   const name = firstNonEmpty(department.i18n_name?.zh_cn, department.name, department.i18n_name?.en_us, departmentId, openDepartmentId);
   const existing = findDepartment(openDepartmentId, departmentId, name);
   const localId = existing?.id ?? makeFeishuLocalId('DEPT', openDepartmentId || departmentId || name);
-  const parentId = department.parent_department_id ? findDepartment(department.parent_department_id, department.parent_department_id)?.id ?? null : null;
   const status = typeof department.status === 'string' ? department.status : department.status?.is_deleted ? 'deleted' : 'active';
 
   if (existing) {
     db.prepare(
       `UPDATE department
-       SET name = ?, parent_department_id = ?, feishu_department_id = ?, feishu_open_department_id = ?, leader_user_id = ?, status = ?, last_feishu_sync_at = ?
+       SET name = ?, feishu_department_id = ?, feishu_open_department_id = ?, leader_user_id = ?, status = ?, last_feishu_sync_at = ?
        WHERE id = ?`
-    ).run(name, parentId, departmentId || null, openDepartmentId || null, department.leader_user_id ?? null, status, syncedAt, existing.id);
+    ).run(name, departmentId || null, openDepartmentId || null, department.leader_user_id ?? null, status, syncedAt, existing.id);
     return { id: existing.id, created: false };
   }
 
   db.prepare(
     `INSERT INTO department (id, name, parent_department_id, feishu_department_id, feishu_open_department_id, leader_user_id, status, last_feishu_sync_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(localId, name, parentId, departmentId || null, openDepartmentId || null, department.leader_user_id ?? null, status, syncedAt);
+  ).run(localId, name, null, departmentId || null, openDepartmentId || null, department.leader_user_id ?? null, status, syncedAt);
   return { id: localId, created: true };
+}
+
+function syncDepartmentParents(departments: FeishuDepartment[], departmentIdMap: Map<string, string>, syncedAt: string) {
+  const updateParent = db.prepare('UPDATE department SET parent_department_id = ?, last_feishu_sync_at = ? WHERE id = ?');
+  const tx = db.transaction(() => {
+    for (const department of departments) {
+      const localDepartmentId = getMappedDepartmentId(departmentIdMap, department);
+      if (!localDepartmentId) continue;
+      const parentDepartmentId = normalizeDepartmentKey(department.parent_department_id);
+      const parentLocalId = parentDepartmentId ? departmentIdMap.get(parentDepartmentId) ?? null : null;
+      updateParent.run(parentLocalId, syncedAt, localDepartmentId);
+    }
+  });
+  tx();
 }
 
 function upsertEmployeeFromContact(user: FeishuUser, departmentId: string | undefined, syncedAt: string) {
@@ -454,16 +501,43 @@ function findEmployee(employee: ReturnType<typeof normalizeFeishuEmployee>): Loc
 }
 
 function feishuDepartmentKey(department: FeishuDepartment) {
-  return department.open_department_id ?? department.department_id ?? '';
+  return normalizeDepartmentKey(department.open_department_id) ?? normalizeDepartmentKey(department.department_id) ?? '';
+}
+
+function setDepartmentMapKeys(map: Map<string, string>, department: FeishuDepartment, localDepartmentId: string) {
+  const keys = [department.open_department_id, department.department_id]
+    .map((item) => normalizeDepartmentKey(item))
+    .filter((item): item is string => Boolean(item));
+  for (const key of keys) map.set(key, localDepartmentId);
+}
+
+function getMappedDepartmentId(map: Map<string, string>, department: FeishuDepartment) {
+  const keys = [department.open_department_id, department.department_id]
+    .map((item) => normalizeDepartmentKey(item))
+    .filter((item): item is string => Boolean(item));
+  for (const key of keys) {
+    const localDepartmentId = map.get(key);
+    if (localDepartmentId) return localDepartmentId;
+  }
+  return null;
+}
+
+function normalizeDepartmentKey(value?: string | null) {
+  if (!value || value === '0') return null;
+  return value;
 }
 
 function preferredDepartmentKey(user: FeishuUser, fallbackDepartmentId: string) {
-  const primary = user.orders?.find((item) => item.is_primary_dept && item.department_id && item.department_id !== '0')?.department_id;
-  return primary ?? user.department_ids?.find((item) => item !== '0') ?? user.departments?.find((item) => item !== '0') ?? fallbackDepartmentId;
+  const primary = normalizeDepartmentKey(user.orders?.find((item) => item.is_primary_dept && normalizeDepartmentKey(item.department_id))?.department_id);
+  return primary ?? user.department_ids?.map(normalizeDepartmentKey).find(Boolean) ?? user.departments?.map(normalizeDepartmentKey).find(Boolean) ?? fallbackDepartmentId;
 }
 
 function syncEmployeeDepartments(employeeId: string, user: FeishuUser, departmentIdMap: Map<string, string>, syncedAt: string) {
-  const keys = new Set([...(user.department_ids ?? []), ...(user.departments ?? [])].filter((item) => item && item !== '0'));
+  const keys = new Set(
+    [...(user.department_ids ?? []), ...(user.departments ?? [])]
+      .map((item) => normalizeDepartmentKey(item))
+      .filter((item): item is string => Boolean(item))
+  );
   const primary = preferredDepartmentKey(user, '');
   const deleteStmt = db.prepare("DELETE FROM employee_department WHERE employee_id = ? AND source = 'feishu'");
   const insertStmt = db.prepare(
