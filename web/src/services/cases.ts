@@ -13,6 +13,7 @@ export type ProjectCasePayload = {
   estimated_weight?: number | null;
   delivery_date?: string | null;
   delivery_status?: string | null;
+  associated_month?: string | null;
   items?: Array<{ id?: string | null; name: string; delivery_date?: string | null; delivery_status?: string | null }>;
   stage_owners?: Array<{ task_type: string; assignee_id?: string | null; team_id?: string | null }>;
 };

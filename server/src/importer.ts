@@ -57,6 +57,7 @@ type ParsedProject = {
   drawingReviewProgress: number | null;
   deliveryDate: string;
   deliveryStatus: string;
+  associatedMonth: string;
   totalProgress: number;
   items: ParsedItem[];
 };
@@ -228,9 +229,11 @@ function parseMainSheet(worksheet: ExcelJS.Worksheet, fileName: string, issues: 
         drawingReviewProgress: parseProgress(row.getCell(6).value, rowNumber, 'F', '图纸定审', worksheet.name, issues).value,
         deliveryDate: normalizeDate(row.getCell(30).value),
         deliveryStatus: cellText(row.getCell(31).value).trim(),
+        associatedMonth: '',
         totalProgress: 0,
         items: []
       };
+      project.associatedMonth = monthFromDate(project.deliveryDate) ?? nowIso().slice(0, 7);
       projects.set(projectKey, project);
     }
 
@@ -346,8 +349,8 @@ function importProject(project: ParsedProject, sourceSheet: string) {
 
   db.prepare(
     `INSERT INTO project_case
-     (id, code, name, category, customer_name, business_owner_id, design_owner_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, source_sheet, source_row, source_seq)
-     VALUES (@id, @code, @name, '', '', @business_owner_id, @design_owner_id, @estimated_weight, 'T', @status, @total_progress, @delivery_date, @delivery_status, @source_sheet, @source_row, @source_seq)
+     (id, code, name, category, customer_name, business_owner_id, design_owner_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, associated_month, source_sheet, source_row, source_seq)
+     VALUES (@id, @code, @name, '', '', @business_owner_id, @design_owner_id, @estimated_weight, 'T', @status, @total_progress, @delivery_date, @delivery_status, @associated_month, @source_sheet, @source_row, @source_seq)
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name,
        business_owner_id = excluded.business_owner_id,
@@ -357,6 +360,7 @@ function importProject(project: ParsedProject, sourceSheet: string) {
        total_progress = excluded.total_progress,
        delivery_date = excluded.delivery_date,
        delivery_status = excluded.delivery_status,
+       associated_month = excluded.associated_month,
        source_sheet = excluded.source_sheet,
        source_row = excluded.source_row,
        source_seq = excluded.source_seq`
@@ -371,6 +375,7 @@ function importProject(project: ParsedProject, sourceSheet: string) {
     total_progress: project.totalProgress,
     delivery_date: project.deliveryDate,
     delivery_status: project.deliveryStatus,
+    associated_month: project.associatedMonth,
     source_sheet: sourceSheet,
     source_row: project.sourceRow,
     source_seq: project.sourceSeq
@@ -577,6 +582,18 @@ function defaultPermissionLevel(role: string) {
   if (role === 'admin' || role === 'business_owner') return 'manager';
   if (['design_owner', 'material_owner', 'quality_owner', 'team_leader'].includes(role)) return 'editor';
   return 'viewer';
+}
+
+function monthFromDate(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text) return null;
+  const yearFirst = text.match(/^(\d{4})[-/年.](\d{1,2})/);
+  if (yearFirst) return `${yearFirst[1]}-${String(Number(yearFirst[2])).padStart(2, '0')}`;
+  const monthFirst = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (!monthFirst) return null;
+  const rawYear = Number(monthFirst[3]);
+  const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+  return `${year}-${String(Number(monthFirst[1])).padStart(2, '0')}`;
 }
 
 function ensureTeam(name: string) {

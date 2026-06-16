@@ -127,6 +127,16 @@ body {
   font-weight: 600;
 }
 
+.matrix-month-row > td {
+  background: #eaf2ff !important;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.matrix-month-row .ant-table-row-expand-icon {
+  display: none;
+}
+
 .matrix-project-row.row-has-exception > td {
   background: #fff4e8;
 }
@@ -226,7 +236,7 @@ body {
 
 .progress-cell {
   width: 100%;
-  min-height: 28px;
+  min-height: 46px;
   height: auto;
   padding: 0;
   line-height: 1;
@@ -245,13 +255,25 @@ body {
   justify-content: center;
 }
 
+.progress-cell-main {
+  min-height: 16px;
+}
+
 .progress-cell-summary {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 28px;
+  min-height: 46px;
   line-height: 1;
+}
+
+.progress-cell-inline {
+  display: inline-flex;
+  min-height: 46px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 .progress-value {
@@ -287,7 +309,7 @@ body {
 
 .progress-owner {
   display: block;
-  max-width: 72px;
+  max-width: 86px;
   margin-top: 2px;
   color: #667085;
   font-size: 10px;
@@ -295,6 +317,31 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.progress-cell-time {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  margin-top: 1px;
+  color: #98a2b3;
+  font-size: 9px;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+
+.matrix-month-title,
+.matrix-month-meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matrix-month-spacer {
+  display: block;
+  min-height: 22px;
 }
 
 .empty-cell {

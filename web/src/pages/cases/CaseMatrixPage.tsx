@@ -57,12 +57,12 @@ export function CaseMatrixPage() {
   const lookupsQuery = useQuery({ queryKey: ['lookups'], queryFn: fetchLookups, enabled: canManageProjects });
 
   const rows = matrixQuery.data?.rows ?? [];
-  const projectRowKeys = useMemo(() => rows.map((row) => row.row_id ?? row.case_item_id), [rows]);
+  const projectRowKeys = useMemo(() => rows.filter((row) => row.row_type === 'project').map((row) => row.row_id ?? row.case_item_id), [rows]);
   const stageDefinitions = useMemo(() => stageDefinitionsFromColumns(matrixQuery.data?.columns ?? []), [matrixQuery.data?.columns]);
 
   const filteredRows = useMemo(() => filterRows(rows, searchKeyword), [rows, searchKeyword]);
   const activeExpandedRowKeys = searchKeyword.trim()
-    ? filteredRows.map((row) => row.row_id ?? row.case_item_id)
+    ? filteredRows.filter((row) => row.row_type === 'project').map((row) => row.row_id ?? row.case_item_id)
     : expandedRowKeys;
   const hasManualExpandedRows = expandedRowKeys.length > 0;
 
@@ -115,7 +115,7 @@ export function CaseMatrixPage() {
     setProjectManagementOpen(false);
     setEditingProject(null);
     form.resetFields();
-    form.setFieldsValue({ items: [{ name: '' }] });
+    form.setFieldsValue({ associated_month: currentMonth(), items: [{ name: '' }] });
     setProjectModalOpen(true);
   };
   const openProjectManagement = () => {
@@ -226,14 +226,20 @@ export function CaseMatrixPage() {
           bordered
           sticky
           tableLayout="fixed"
-          scroll={{ x: 2440, y: 'calc(100vh - 178px)' }}
+          scroll={{ x: 2700, y: 'calc(100vh - 178px)' }}
           expandable={{
             expandedRowKeys: activeExpandedRowKeys,
             onExpandedRowsChange: (keys) => setExpandedRowKeys([...keys]),
             indentSize: 14
           }}
           rowClassName={(row) => {
-            const classes = [row.row_type === 'project' ? 'matrix-project-row' : 'matrix-item-row'];
+            const classes = [
+              row.row_type === 'month'
+                ? 'matrix-month-row'
+                : row.row_type === 'project'
+                  ? 'matrix-project-row'
+                  : 'matrix-item-row'
+            ];
             if (row.open_exception_count > 0) classes.push('row-has-exception');
             return classes.join(' ');
           }}
@@ -345,9 +351,12 @@ function buildColumns(
         className: `matrix-stage-cell stage-${stageColor}`,
         onHeaderCell: () => ({ className: `matrix-substage-header stage-${stageColor}` }),
         onCell: () => ({ className: `matrix-stage-cell stage-${stageColor}` }),
-        render: (_value: unknown, row: MatrixRow) => isPlainMatrixColumn(child)
-          ? <DeliveryInfoCell columnKey={child.key} row={row} editable={canManageProjects} onEdit={onEditDelivery} />
-          : <ProgressCell cell={row.cells[child.key]} onOpenTask={openTask} />
+        render: (_value: unknown, row: MatrixRow) => {
+          if (row.row_type === 'month') return <span className="matrix-month-spacer" />;
+          return isPlainMatrixColumn(child)
+            ? <DeliveryInfoCell columnKey={child.key} row={row} editable={canManageProjects} onEdit={onEditDelivery} />
+            : <ProgressCell cell={row.cells[child.key]} onOpenTask={openTask} />;
+        }
       }))
     };
   });
@@ -362,7 +371,7 @@ function isPlainMatrixColumn(column: MatrixColumn) {
 function matrixColumnWidth(column: MatrixColumn) {
   if (column.key === 'delivery_date') return 112;
   if (column.key === 'delivery_status') return 126;
-  return 82;
+  return 96;
 }
 
 function renderPinnedCell(key: string, row: MatrixRow) {
@@ -373,6 +382,9 @@ function renderPinnedCell(key: string, row: MatrixRow) {
     return count > 0 ? <Tag color="red">{count}</Tag> : <span className="empty-cell">0</span>;
   }
   if (key === 'case_name') {
+    if (row.row_type === 'month') {
+      return <Typography.Text strong className="matrix-month-title">{value ? String(value) : '未分类'}</Typography.Text>;
+    }
     const text = value ? String(value) : row.row_type === 'item' ? '' : '-';
     return (
       <Space direction="vertical" size={0} className="matrix-row-title">
@@ -386,6 +398,9 @@ function renderPinnedCell(key: string, row: MatrixRow) {
     );
   }
   if (key === 'case_item_name') {
+    if (row.row_type === 'month') {
+      return <Typography.Text type="secondary" className="matrix-month-meta">{value ? String(value) : '-'}</Typography.Text>;
+    }
     const text = value ? String(value) : '-';
     return (
       <Space direction="vertical" size={0} className="matrix-row-title">
@@ -452,9 +467,22 @@ function filterRows(rows: MatrixRow[], keyword: string) {
   const normalizedKeyword = keyword.trim().toLowerCase();
   if (!normalizedKeyword) return rows;
   const matchedRows: MatrixRow[] = [];
+  let currentMonthRow: MatrixRow | null = null;
+  let currentMonthMatched = false;
+  const appendMonthIfNeeded = () => {
+    if (!currentMonthRow || currentMonthMatched) return;
+    matchedRows.push(currentMonthRow);
+    currentMonthMatched = true;
+  };
   for (const row of rows) {
+    if (row.row_type === 'month') {
+      currentMonthRow = row;
+      currentMonthMatched = false;
+      continue;
+    }
     const children = row.children?.filter((child) => rowMatches(child, normalizedKeyword)) ?? [];
     if (rowMatches(row, normalizedKeyword) || children.length > 0) {
+      appendMonthIfNeeded();
       matchedRows.push({ ...row, children: children.length > 0 ? children : row.children });
     }
   }
@@ -495,6 +523,13 @@ function ProjectManagementModal({
       dataIndex: 'name',
       key: 'name',
       render: (value: string) => <EllipsisText text={value || '-'} strong />
+    },
+    {
+      title: '关联年月',
+      dataIndex: 'associated_month',
+      key: 'associated_month',
+      width: 96,
+      render: (value: string | null) => value || '-'
     },
     {
       title: '操作',
@@ -618,6 +653,13 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
           <Form.Item label="项目类型" name="category">
             <Input placeholder="例如 护栏模板" />
           </Form.Item>
+          <Form.Item
+            label="关联年月"
+            name="associated_month"
+            rules={[{ pattern: /^\d{4}-(0[1-9]|1[0-2])$/, message: '请输入 YYYY-MM 格式' }]}
+          >
+            <Input placeholder="例如 2026-04" />
+          </Form.Item>
           <Form.Item label="客户名称" name="customer_name">
             <Input placeholder="可选" />
           </Form.Item>
@@ -709,6 +751,7 @@ function projectToForm(project: ProjectCase): ProjectCaseFormValues {
     code: project.code ?? null,
     name: project.name,
     category: project.category ?? null,
+    associated_month: project.associated_month ?? null,
     customer_name: project.customer_name ?? null,
     business_owner_id: project.business_owner_id ?? null,
     design_owner_id: project.design_owner_id ?? null,
@@ -748,6 +791,7 @@ function normalizeProjectPayload(values: ProjectCaseFormValues, stages: StageDef
     code: values.code ?? null,
     name: values.name,
     category: values.category ?? null,
+    associated_month: values.associated_month ?? null,
     customer_name: values.customer_name ?? null,
     business_owner_id: values.business_owner_id ?? null,
     design_owner_id: designOwner,
@@ -771,6 +815,11 @@ function decodeOwnerValue(value: string | null | undefined) {
   if (type === 'employee') return { assignee_id: id, team_id: null };
   if (type === 'team') return { assignee_id: null, team_id: id };
   return { assignee_id: null, team_id: null };
+}
+
+function currentMonth() {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
 function stageDefinitionsFromColumns(columns: MatrixColumn[]): StageDefinition[] {

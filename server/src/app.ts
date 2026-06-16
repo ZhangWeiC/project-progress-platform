@@ -108,7 +108,7 @@ app.get('/api/cases', async (request) => {
        FROM project_case pc
        LEFT JOIN employee b ON b.id = pc.business_owner_id
        LEFT JOIN employee d ON d.id = pc.design_owner_id
-       ORDER BY pc.source_seq`
+       ORDER BY pc.associated_month DESC, pc.source_seq`
     ).all();
   }
   return db.prepare(
@@ -122,7 +122,7 @@ app.get('/api/cases', async (request) => {
        WHERE m.project_case_id = pc.id
          AND m.user_id = ?
      )
-     ORDER BY pc.source_seq`
+     ORDER BY pc.associated_month DESC, pc.source_seq`
   ).all(user.id);
 });
 
@@ -146,6 +146,7 @@ const projectCaseFields = {
   estimated_weight: z.number().nullable().optional(),
   delivery_date: z.string().trim().nullable().optional(),
   delivery_status: z.string().trim().nullable().optional(),
+  associated_month: z.string().trim().nullable().optional(),
   items: z.array(projectCaseItemBody).optional(),
   stage_owners: z.array(projectCaseStageOwnerBody).optional()
 };

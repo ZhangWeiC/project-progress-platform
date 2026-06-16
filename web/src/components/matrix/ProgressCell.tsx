@@ -15,6 +15,7 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
   const owner = cell.ownerMerged ? '' : cell.ownerName;
   const formattedValue = value === null ? null : `${Math.round(value)}%`;
   const valueClassName = `progress-value ${progressValueClassName(cell, value)}`;
+  const timing = value === null ? null : <ProgressTiming cell={cell} />;
 
   if (cell.targetId && cell.taskId) {
     return (
@@ -24,7 +25,7 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
         size="small"
         onClick={() => onOpenTask?.(cell.taskId!)}
       >
-        <Space size={4}>
+        <Space size={4} className="progress-cell-main">
           {formattedValue === null ? <span className="empty-cell">-</span> : <span className={valueClassName}>{formattedValue}</span>}
           {!editable && (
             <Tooltip title="当前用户不可编辑">
@@ -37,6 +38,7 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
             <span className="progress-owner">{owner}</span>
           </Tooltip>
         )}
+        {timing}
       </Button>
     );
   }
@@ -50,6 +52,7 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
             <span className="progress-owner">{owner}</span>
           </Tooltip>
         )}
+        {timing}
       </div>
     );
   }
@@ -59,7 +62,12 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
   }
 
   if (typeof cell.value === 'number') {
-    return <span className={valueClassName}>{formattedValue}</span>;
+    return (
+      <span className="progress-cell-inline">
+        <span className={valueClassName}>{formattedValue}</span>
+        {timing}
+      </span>
+    );
   }
 
   if (cell.value === null || cell.value === '') {
@@ -75,4 +83,41 @@ function progressValueClassName(cell: MatrixCell, value: number | null) {
   if (value >= 100) return 'progress-value-completed';
   if (value > 0) return 'progress-value-active';
   return 'progress-value-empty';
+}
+
+function ProgressTiming({ cell }: { cell: MatrixCell }) {
+  const start = formatShortDateTime(cell.progress_started_at);
+  const finish = formatShortDateTime(cell.progress_finished_at);
+  const title = (
+    <Space direction="vertical" size={0}>
+      <span>开始时间：{formatFullDateTime(cell.progress_started_at)}</span>
+      <span>结束时间：{formatFullDateTime(cell.progress_finished_at)}</span>
+    </Space>
+  );
+  return (
+    <Tooltip title={title}>
+      <span className="progress-cell-time">
+        <span>始 {start}</span>
+        <span>完 {finish}</span>
+      </span>
+    </Tooltip>
+  );
+}
+
+function formatShortDateTime(value: string | null | undefined) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(5, 10) || value;
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function formatFullDateTime(value: string | null | undefined) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function pad(value: number) {
+  return String(value).padStart(2, '0');
 }

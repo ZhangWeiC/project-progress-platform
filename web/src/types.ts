@@ -18,17 +18,20 @@ export type MatrixCell = {
   ownerMerged?: boolean;
   departmentName?: string | null;
   aggregateCount?: number;
+  progress_started_at?: string | null;
+  progress_finished_at?: string | null;
 };
 
 export type MatrixRow = {
   row_id?: string;
-  row_type?: 'project' | 'item';
+  row_type?: 'month' | 'project' | 'item';
   project_case_id: string;
   case_item_id: string;
   item_progress: number;
   cells: Record<string, MatrixCell>;
   open_exception_count: number;
   children?: MatrixRow[];
+  associated_month?: string | null;
 };
 
 export type MatrixResponse = {
@@ -51,6 +54,7 @@ export type ProjectCase = {
   business_owner_id?: string | null;
   design_owner_id?: string | null;
   estimated_weight?: number | null;
+  associated_month?: string | null;
   status: string;
   total_progress: number;
   business_owner_name?: string;

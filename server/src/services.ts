@@ -106,9 +106,13 @@ export function updateProgress(targetType: TargetType, targetId: string, progres
   }
 
   const nextStatus = progress >= 100 ? 'completed' : progress > 0 ? 'in_progress' : 'not_started';
+  const changedAt = nowIso();
 
   const tx = db.transaction(() => {
     db.prepare(`UPDATE ${table} SET progress = ?, status = ? WHERE id = ?`).run(progress, nextStatus, targetId);
+    if (targetType === 'task') {
+      updateTaskActualDates(targetId, before.progress, progress, changedAt);
+    }
     db.prepare(
       `INSERT INTO progress_log
        (id, target_type, target_id, changed_by, before_status, after_status, before_progress, after_progress, source, reason, remark, created_at)
@@ -125,30 +129,44 @@ export function updateProgress(targetType: TargetType, targetId: string, progres
       source: 'manual_edit',
       reason: reason ?? '',
       remark: '',
-      created_at: nowIso()
+      created_at: changedAt
     });
 
     const taskId = targetType === 'task' ? targetId : (db.prepare('SELECT case_task_id FROM case_subtask WHERE id = ?').get(targetId) as { case_task_id: string }).case_task_id;
-    recalculateTask(taskId);
+    recalculateTask(taskId, changedAt);
   });
   tx();
 
   return getTaskDetails(targetType === 'task' ? targetId : (db.prepare('SELECT case_task_id FROM case_subtask WHERE id = ?').get(targetId) as { case_task_id: string }).case_task_id, user);
 }
 
-export function recalculateTask(taskId: string) {
+export function recalculateTask(taskId: string, changedAt = nowIso()) {
   const subtasks = db
     .prepare('SELECT progress FROM case_subtask WHERE case_task_id = ? AND is_applicable = 1 AND include_in_progress = 1')
     .all(taskId) as Array<{ progress: number }>;
   if (subtasks.length > 0) {
+    const before = db.prepare('SELECT progress FROM case_task WHERE id = ?').get(taskId) as { progress: number } | undefined;
     const avg = roundProgress(subtasks.reduce((sum, row) => sum + row.progress, 0) / subtasks.length);
     const status = avg >= 100 ? 'completed' : avg > 0 ? 'in_progress' : 'not_started';
     db.prepare('UPDATE case_task SET progress = ?, status = ? WHERE id = ?').run(avg, status, taskId);
+    updateTaskActualDates(taskId, before?.progress ?? 0, avg, changedAt);
   }
 
   const task = db.prepare('SELECT project_case_id, case_item_id FROM case_task WHERE id = ?').get(taskId) as { project_case_id: string; case_item_id: string | null };
   if (task.case_item_id) recalculateItem(task.case_item_id);
   recalculateCase(task.project_case_id);
+}
+
+function updateTaskActualDates(taskId: string, beforeProgress: number, nextProgress: number, changedAt: string) {
+  if (beforeProgress <= 0 && nextProgress > 0) {
+    db.prepare('UPDATE case_task SET actual_start_at = COALESCE(actual_start_at, ?) WHERE id = ?').run(changedAt, taskId);
+  }
+  if (beforeProgress < 100 && nextProgress >= 100) {
+    db.prepare('UPDATE case_task SET actual_finish_at = ? WHERE id = ?').run(changedAt, taskId);
+  }
+  if (nextProgress < 100) {
+    db.prepare('UPDATE case_task SET actual_finish_at = null WHERE id = ?').run(taskId);
+  }
 }
 
 function recalculateItem(itemId: string) {
@@ -199,6 +217,7 @@ export type ProjectCaseInput = {
   estimated_weight?: number | null;
   delivery_date?: string | null;
   delivery_status?: string | null;
+  associated_month?: string | null;
   items?: ProjectCaseItemInput[];
   stage_owners?: ProjectCaseStageOwnerInput[];
 };
@@ -236,11 +255,13 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
   validateStageOwners(input.stage_owners);
   const id = makeId('CASE');
   const maxSeq = db.prepare('SELECT COALESCE(MAX(source_seq), 0) as value FROM project_case').get() as { value: number };
+  const deliveryDate = normalizeText(input.delivery_date);
+  const associatedMonth = normalizeAssociatedMonth(input.associated_month, deliveryDate);
   const tx = db.transaction(() => {
     db.prepare(
       `INSERT INTO project_case
-       (id, code, name, category, customer_name, business_owner_id, design_owner_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, source_sheet, source_row, source_seq)
-       VALUES (@id, @code, @name, @category, @customer_name, @business_owner_id, @design_owner_id, @estimated_weight, 'T', 'in_progress', 0, @delivery_date, @delivery_status, 'manual', null, @source_seq)`
+       (id, code, name, category, customer_name, business_owner_id, design_owner_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, associated_month, source_sheet, source_row, source_seq)
+       VALUES (@id, @code, @name, @category, @customer_name, @business_owner_id, @design_owner_id, @estimated_weight, 'T', 'in_progress', 0, @delivery_date, @delivery_status, @associated_month, 'manual', null, @source_seq)`
     ).run({
       id,
       code: normalizeText(input.code),
@@ -250,8 +271,9 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
       business_owner_id: input.business_owner_id ?? null,
       design_owner_id: input.design_owner_id ?? null,
       estimated_weight: input.estimated_weight ?? null,
-      delivery_date: normalizeText(input.delivery_date),
+      delivery_date: deliveryDate,
       delivery_status: normalizeText(input.delivery_status),
+      associated_month: associatedMonth,
       source_seq: Number(maxSeq.value ?? 0) + 1
     });
     syncProjectOwnerMembers(id, input.business_owner_id ?? null, input.design_owner_id ?? null);
@@ -280,6 +302,10 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
   }
   const nextBusinessOwnerId = input.business_owner_id === undefined ? existing.business_owner_id ?? null : input.business_owner_id ?? null;
   const nextDesignOwnerId = input.design_owner_id === undefined ? existing.design_owner_id ?? null : input.design_owner_id ?? null;
+  const nextDeliveryDate = normalizeText(input.delivery_date === undefined ? existing.delivery_date : input.delivery_date);
+  const nextAssociatedMonth = input.associated_month === undefined
+    ? normalizeAssociatedMonth(existing.associated_month, nextDeliveryDate)
+    : normalizeAssociatedMonth(input.associated_month, nextDeliveryDate);
   const tx = db.transaction(() => {
     db.prepare(
       `UPDATE project_case
@@ -291,7 +317,8 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
            design_owner_id = @design_owner_id,
            estimated_weight = @estimated_weight,
            delivery_date = @delivery_date,
-           delivery_status = @delivery_status
+           delivery_status = @delivery_status,
+           associated_month = @associated_month
        WHERE id = @id`
     ).run({
       id: projectCaseId,
@@ -302,8 +329,9 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
       business_owner_id: nextBusinessOwnerId,
       design_owner_id: nextDesignOwnerId,
       estimated_weight: input.estimated_weight === undefined ? existing.estimated_weight ?? null : input.estimated_weight ?? null,
-      delivery_date: normalizeText(input.delivery_date === undefined ? existing.delivery_date : input.delivery_date),
-      delivery_status: normalizeText(input.delivery_status === undefined ? existing.delivery_status : input.delivery_status)
+      delivery_date: nextDeliveryDate,
+      delivery_status: normalizeText(input.delivery_status === undefined ? existing.delivery_status : input.delivery_status),
+      associated_month: nextAssociatedMonth
     });
     syncProjectOwnerMembers(projectCaseId, nextBusinessOwnerId, nextDesignOwnerId);
     ensureProjectTasks(projectCaseId, stageOwnerInputMap(input.stage_owners), nextDesignOwnerId);
@@ -737,6 +765,30 @@ function normalizeText(value: string | null | undefined) {
   return normalized ? normalized : null;
 }
 
+function normalizeAssociatedMonth(value: string | null | undefined, fallbackDate?: string | null) {
+  const normalized = normalizeText(value);
+  if (normalized) {
+    const month = monthFromDate(normalized);
+    if (month) return month;
+    const err = new Error('关联年月格式应为 YYYY-MM');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+  return monthFromDate(fallbackDate) ?? nowIso().slice(0, 7);
+}
+
+function monthFromDate(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text) return null;
+  const yearFirst = text.match(/^(\d{4})[-/年.](\d{1,2})/);
+  if (yearFirst) return `${yearFirst[1]}-${String(Number(yearFirst[2])).padStart(2, '0')}`;
+  const monthFirst = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (!monthFirst) return null;
+  const rawYear = Number(monthFirst[3]);
+  const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+  return `${year}-${String(Number(monthFirst[1])).padStart(2, '0')}`;
+}
+
 export function getTaskDetails(taskId: string, user?: CurrentUser) {
   const task = db
     .prepare(
@@ -811,6 +863,7 @@ type MatrixProject = {
   total_progress: number;
   delivery_date: string | null;
   delivery_status: string | null;
+  associated_month: string | null;
   business_owner_name: string | null;
   design_owner_name: string | null;
   open_exception_count: number;
@@ -845,6 +898,8 @@ type MatrixTask = {
   assignee_name: string | null;
   team_name: string | null;
   department_name: string | null;
+  actual_start_at: string | null;
+  actual_finish_at: string | null;
 };
 
 type MatrixSubtask = {
@@ -855,6 +910,8 @@ type MatrixSubtask = {
   status: string;
   assignee_name: string | null;
   team_name: string | null;
+  progress_started_at: string | null;
+  progress_finished_at: string | null;
 };
 
 type MatrixCell = {
@@ -868,31 +925,35 @@ type MatrixCell = {
   ownerMerged?: boolean;
   departmentName?: string | null;
   aggregateCount?: number;
+  progress_started_at?: string | null;
+  progress_finished_at?: string | null;
 };
 
 type MatrixRow = {
   row_id: string;
-  row_type: 'project' | 'item';
+  row_type: 'month' | 'project' | 'item';
   project_case_id: string;
   case_item_id: string;
   item_progress: number;
   cells: Record<string, MatrixCell>;
   open_exception_count: number;
   children?: MatrixRow[];
+  associated_month?: string | null;
 };
 
 export function getAllMatrix(user: CurrentUser) {
   const projects = getVisibleMatrixProjects(user);
   const templates = getMatrixTemplateColumns();
   const columns = buildMatrixColumns(templates);
-  const rows = projects.map((project) => buildProjectMatrixRow(project, templates, user));
-  const itemCount = rows.reduce((sum, row) => sum + (row.children?.length ?? 0), 0);
-  const openExceptionCount = rows.reduce((sum, row) => sum + row.open_exception_count, 0);
+  const projectRows = projects.map((project) => buildProjectMatrixRow(project, templates, user));
+  const rows = groupMatrixRowsByMonth(projectRows);
+  const itemCount = projectRows.reduce((sum, row) => sum + (row.children?.length ?? 0), 0);
+  const openExceptionCount = projectRows.reduce((sum, row) => sum + row.open_exception_count, 0);
   return {
     columns,
     rows,
     summary: {
-      project_count: rows.length,
+      project_count: projectRows.length,
       item_count: itemCount,
       open_exception_count: openExceptionCount
     }
@@ -912,10 +973,53 @@ function getVisibleMatrixProjects(user: CurrentUser) {
                  WHERE m.project_case_id = pc.id
                    AND m.user_id = ?
                )`}
-               ORDER BY pc.source_seq, pc.id`;
+               ORDER BY pc.associated_month DESC, pc.source_seq, pc.id`;
   return (canManageProjects(user)
     ? db.prepare(sql).all()
     : db.prepare(sql).all(user.id)) as MatrixProject[];
+}
+
+function groupMatrixRowsByMonth(projectRows: MatrixRow[]) {
+  const groups = new Map<string, MatrixRow[]>();
+  for (const row of projectRows) {
+    const month = row.associated_month ?? '未分类';
+    groups.set(month, [...(groups.get(month) ?? []), row]);
+  }
+  return Array.from(groups.entries())
+    .sort(([left], [right]) => compareAssociatedMonthDesc(left, right))
+    .flatMap(([month, rows]) => [buildMonthMatrixRow(month, rows), ...rows]);
+}
+
+function buildMonthMatrixRow(month: string, rows: MatrixRow[]): MatrixRow {
+  const itemCount = rows.reduce((sum, row) => sum + (row.children?.length ?? 0), 0);
+  const exceptionCount = rows.reduce((sum, row) => sum + row.open_exception_count, 0);
+  return {
+    row_id: `MONTH-${month}`,
+    row_type: 'month',
+    project_case_id: '',
+    case_item_id: `MONTH-${month}`,
+    item_progress: 0,
+    associated_month: month,
+    open_exception_count: exceptionCount,
+    cells: {
+      case_name: { value: formatAssociatedMonth(month) },
+      case_item_name: { value: `${rows.length} 项目 / ${itemCount} 子项目` },
+      open_exception_count: { value: exceptionCount }
+    }
+  };
+}
+
+function compareAssociatedMonthDesc(left: string, right: string) {
+  if (left === right) return 0;
+  if (left === '未分类') return 1;
+  if (right === '未分类') return -1;
+  return right.localeCompare(left);
+}
+
+function formatAssociatedMonth(month: string) {
+  const matched = month.match(/^(\d{4})-(\d{2})$/);
+  if (!matched) return month;
+  return `${matched[1]}年${matched[2]}月`;
 }
 
 function getMatrixTemplateColumns() {
@@ -990,7 +1094,9 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
         value: average,
         status: progressStatus(average),
         ownerName: compactOwners(childCells.map((cell) => cell.ownerName)),
-        aggregateCount: childCells.length
+        aggregateCount: childCells.length,
+        progress_started_at: aggregateProgressStart(childCells),
+        progress_finished_at: aggregateProgressFinish(childCells, average)
       };
       if (hasSingleOwner(childCells)) {
         for (const cell of childCells) {
@@ -1006,6 +1112,7 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
     project_case_id: project.id,
     case_item_id: `PROJECT-${project.id}`,
     item_progress: project.total_progress,
+    associated_month: project.associated_month,
     cells,
     open_exception_count: project.open_exception_count,
     children
@@ -1036,7 +1143,9 @@ function buildItemMatrixRow(project: MatrixProject, item: MatrixItem, caseTasks:
         targetId: subtask.id,
         taskId: task.id,
         ownerName: ownerLabel(subtask, task),
-        departmentName: task.department_name
+        departmentName: task.department_name,
+        progress_started_at: subtask.progress_started_at ?? (subtask.progress > 0 ? task.actual_start_at : null),
+        progress_finished_at: subtask.progress >= 100 ? subtask.progress_finished_at ?? task.actual_finish_at : null
       };
     }
   }
@@ -1070,7 +1179,19 @@ function getMatrixTasks(projectCaseId: string, itemId: string | null) {
 function getMatrixSubtasks(taskId: string) {
   return db
     .prepare(
-      `SELECT s.*, e.name as assignee_name, tm.name as team_name
+      `SELECT s.*, e.name as assignee_name, tm.name as team_name,
+              (SELECT MIN(pl.created_at)
+               FROM progress_log pl
+               WHERE pl.target_type = 'subtask'
+                 AND pl.target_id = s.id
+                 AND COALESCE(pl.after_progress, 0) > 0
+                 AND COALESCE(pl.after_progress, 0) != COALESCE(pl.before_progress, -1)) as progress_started_at,
+              (SELECT MIN(pl.created_at)
+               FROM progress_log pl
+               WHERE pl.target_type = 'subtask'
+                 AND pl.target_id = s.id
+                 AND COALESCE(pl.after_progress, 0) >= 100
+                 AND COALESCE(pl.before_progress, 0) < 100) as progress_finished_at
        FROM case_subtask s
        LEFT JOIN employee e ON e.id = s.assignee_id
        LEFT JOIN team tm ON tm.id = s.team_id
@@ -1097,6 +1218,17 @@ function businessOwnerLabel(name: string | null | undefined) {
 function hasSingleOwner(cells: MatrixCell[]) {
   const owners = new Set(cells.map((cell) => cell.ownerName).filter(Boolean));
   return cells.length > 1 && cells.every((cell) => Boolean(cell.ownerName)) && owners.size === 1;
+}
+
+function aggregateProgressStart(cells: MatrixCell[]) {
+  const dates = cells.map((cell) => cell.progress_started_at).filter((value): value is string => Boolean(value)).sort();
+  return dates[0] ?? null;
+}
+
+function aggregateProgressFinish(cells: MatrixCell[], average: number) {
+  if (average < 100) return null;
+  const dates = cells.map((cell) => cell.progress_finished_at).filter((value): value is string => Boolean(value)).sort();
+  return dates[dates.length - 1] ?? null;
 }
 
 export function getMatrix(projectCaseId: string, user: CurrentUser) {

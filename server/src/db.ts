@@ -110,6 +110,7 @@ export function initializeDatabase() {
       total_progress REAL NOT NULL DEFAULT 0,
       delivery_date TEXT,
       delivery_status TEXT,
+      associated_month TEXT,
       source_sheet TEXT,
       source_row INTEGER,
       source_seq INTEGER,
@@ -388,6 +389,7 @@ export function initializeDatabase() {
 
   migratePermissionModel();
   migrateFeishuIdentityColumns();
+  migrateProjectAssociatedMonth();
   seedDatabase();
   seedCredentials();
   migrateWorkflowModel();
@@ -494,6 +496,36 @@ function addColumnIfMissing(table: string, column: string, definition: string) {
   db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
 }
 
+function migrateProjectAssociatedMonth() {
+  addColumnIfMissing('project_case', 'associated_month', 'TEXT');
+  const fallbackMonth = nowIso().slice(0, 7);
+  const rows = db.prepare('SELECT id, associated_month, delivery_date FROM project_case').all() as Array<{
+    id: string;
+    associated_month: string | null;
+    delivery_date: string | null;
+  }>;
+  const update = db.prepare('UPDATE project_case SET associated_month = ? WHERE id = ?');
+  const tx = db.transaction((items: typeof rows) => {
+    for (const row of items) {
+      const normalized = normalizeMonthValue(row.associated_month) ?? normalizeMonthValue(row.delivery_date) ?? fallbackMonth;
+      if (normalized !== row.associated_month) update.run(normalized, row.id);
+    }
+  });
+  tx(rows);
+}
+
+function normalizeMonthValue(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text) return null;
+  const yearFirst = text.match(/^(\d{4})[-/年.](\d{1,2})/);
+  if (yearFirst) return `${yearFirst[1]}-${String(Number(yearFirst[2])).padStart(2, '0')}`;
+  const monthFirst = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (!monthFirst) return null;
+  const rawYear = Number(monthFirst[3]);
+  const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+  return `${year}-${String(Number(monthFirst[1])).padStart(2, '0')}`;
+}
+
 function shouldSeedDemoData() {
   return process.env.SEED_DEMO_DATA === '1' || process.env.NODE_ENV !== 'production';
 }
@@ -564,8 +596,8 @@ function seedDatabase() {
   if (existing.count > 0 || !shouldSeedDemoData()) return;
 
   insertMany('project_case', [
-    { id: 'CASE-202604-001', code: 'P-001', name: '惠增一标20M小箱梁中梁旧模板改造', category: '旧模板改造', customer_name: '', business_owner_id: 'user-zhang', design_owner_id: 'user-wei-li', estimated_weight: 15, weight_unit: 'T', status: 'completed', total_progress: 100, delivery_date: '2026-04-09', delivery_status: '已出货', source_sheet: '总表', source_row: 9, source_seq: 1 },
-    { id: 'CASE-202604-002', code: 'P-002', name: '狮子洋通道工程3标护栏模板', category: '护栏模板', customer_name: '', business_owner_id: 'user-zhang', design_owner_id: 'user-rao', estimated_weight: 20, weight_unit: 'T', status: 'in_progress', total_progress: 86, delivery_date: '2026-04-23', delivery_status: '部分待确认', source_sheet: '总表', source_row: 19, source_seq: 2 }
+    { id: 'CASE-202604-001', code: 'P-001', name: '惠增一标20M小箱梁中梁旧模板改造', category: '旧模板改造', customer_name: '', business_owner_id: 'user-zhang', design_owner_id: 'user-wei-li', estimated_weight: 15, weight_unit: 'T', status: 'completed', total_progress: 100, delivery_date: '2026-04-09', delivery_status: '已出货', associated_month: '2026-04', source_sheet: '总表', source_row: 9, source_seq: 1 },
+    { id: 'CASE-202604-002', code: 'P-002', name: '狮子洋通道工程3标护栏模板', category: '护栏模板', customer_name: '', business_owner_id: 'user-zhang', design_owner_id: 'user-rao', estimated_weight: 20, weight_unit: 'T', status: 'in_progress', total_progress: 86, delivery_date: '2026-04-23', delivery_status: '部分待确认', associated_month: '2026-04', source_sheet: '总表', source_row: 19, source_seq: 2 }
   ]);
 
   insertMany('case_item', [
