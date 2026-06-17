@@ -499,6 +499,7 @@ function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | un
   const existingItems = new Set(
     (db.prepare('SELECT id FROM case_item WHERE project_case_id = ?').all(projectCaseId) as Array<{ id: string }>).map((item) => item.id)
   );
+  const retainedItemIds = new Set<string>();
   const maxRow = db.prepare('SELECT COALESCE(MAX(source_row), 0) as value FROM case_item WHERE project_case_id = ?').get(projectCaseId) as { value: number };
   let nextRow = Number(maxRow.value ?? 0);
 
@@ -526,6 +527,7 @@ function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | un
         normalizeText(item.delivery_status === undefined ? existingItem?.delivery_status : item.delivery_status),
         item.id
       );
+      retainedItemIds.add(item.id);
       ensureItemTasks(projectCaseId, item.id, stageOwners);
       continue;
     }
@@ -544,8 +546,66 @@ function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | un
       normalizeText(item.delivery_status),
       nextRow
     );
+    retainedItemIds.add(itemId);
     ensureItemTasks(projectCaseId, itemId, stageOwners);
   }
+
+  for (const itemId of existingItems) {
+    if (!retainedItemIds.has(itemId)) deleteCaseItem(projectCaseId, itemId);
+  }
+}
+
+function deleteCaseItem(projectCaseId: string, itemId: string) {
+  db.prepare(
+    `DELETE FROM exception_comment
+     WHERE exception_id IN (
+       SELECT ex.id FROM exception_record ex
+       WHERE ex.case_item_id = ?
+          OR ex.case_task_id IN (SELECT id FROM case_task WHERE case_item_id = ?)
+          OR ex.case_subtask_id IN (
+            SELECT s.id FROM case_subtask s
+            JOIN case_task t ON t.id = s.case_task_id
+            WHERE t.case_item_id = ?
+          )
+     )`
+  ).run(itemId, itemId, itemId);
+  db.prepare(
+    `DELETE FROM exception_record
+     WHERE case_item_id = ?
+        OR case_task_id IN (SELECT id FROM case_task WHERE case_item_id = ?)
+        OR case_subtask_id IN (
+          SELECT s.id FROM case_subtask s
+          JOIN case_task t ON t.id = s.case_task_id
+          WHERE t.case_item_id = ?
+        )`
+  ).run(itemId, itemId, itemId);
+  db.prepare(
+    `DELETE FROM work_log_entry
+     WHERE case_item_id = ?
+        OR case_task_id IN (SELECT id FROM case_task WHERE case_item_id = ?)
+        OR case_subtask_id IN (
+          SELECT s.id FROM case_subtask s
+          JOIN case_task t ON t.id = s.case_task_id
+          WHERE t.case_item_id = ?
+        )`
+  ).run(itemId, itemId, itemId);
+  db.prepare(
+    `DELETE FROM production_plan_item
+     WHERE case_item_id = ?
+        OR case_task_id IN (SELECT id FROM case_task WHERE case_item_id = ?)`
+  ).run(itemId, itemId);
+  db.prepare(
+    `DELETE FROM progress_log
+     WHERE (target_type = 'task' AND target_id IN (SELECT id FROM case_task WHERE case_item_id = ?))
+        OR (target_type = 'subtask' AND target_id IN (
+          SELECT s.id FROM case_subtask s
+          JOIN case_task t ON t.id = s.case_task_id
+          WHERE t.case_item_id = ?
+        ))`
+  ).run(itemId, itemId);
+  db.prepare('DELETE FROM case_subtask WHERE case_task_id IN (SELECT id FROM case_task WHERE case_item_id = ?)').run(itemId);
+  db.prepare('DELETE FROM case_task WHERE case_item_id = ?').run(itemId);
+  db.prepare('DELETE FROM case_item WHERE project_case_id = ? AND id = ?').run(projectCaseId, itemId);
 }
 
 type StageOwnerValue = {

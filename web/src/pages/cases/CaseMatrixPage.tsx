@@ -803,8 +803,22 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
                   <Form.Item noStyle shouldUpdate>
                     {({ getFieldValue }) => {
                       const itemId = getFieldValue(['items', field.name, 'id']);
-                      return itemId ? null : (
-                        <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                      if (itemId) {
+                        return (
+                          <Popconfirm
+                            title="删除子项目"
+                            description="保存项目后会删除该子项目及关联任务、日报和异常，确认先从表单移除？"
+                            okText="移除"
+                            cancelText="取消"
+                            okButtonProps={{ danger: true }}
+                            onConfirm={() => remove(field.name)}
+                          >
+                            <Button type="text" danger icon={<DeleteOutlined />} aria-label="删除子项目" />
+                          </Popconfirm>
+                        );
+                      }
+                      return (
+                        <Button type="text" danger icon={<DeleteOutlined />} aria-label="删除子项目" onClick={() => remove(field.name)} />
                       );
                     }}
                   </Form.Item>
