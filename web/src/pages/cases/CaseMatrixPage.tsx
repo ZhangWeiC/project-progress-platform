@@ -1,9 +1,9 @@
-import { CompressOutlined, DeleteOutlined, EditOutlined, ExpandAltOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
+import { CompressOutlined, DeleteOutlined, EditOutlined, ExpandAltOutlined, MinusOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import { Button, Card, Divider, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import type { Key } from 'react';
+import type { Key, MouseEvent } from 'react';
 import { TaskDrawer } from '../../components/drawers/TaskDrawer';
 import { ProgressCell } from '../../components/matrix/ProgressCell';
 import { createProjectCase, deleteProjectCase, fetchAllMatrix, fetchCases, fetchLookups, fetchProjectCaseManageProfile, updateDeliveryInfo, updateProjectCase } from '../../services/cases';
@@ -98,7 +98,8 @@ export function CaseMatrixPage() {
     onSuccess: async () => {
       message.success('项目已删除');
       await refreshProjectQueries();
-    }
+    },
+    onError: (error) => message.error(error.message)
   });
   const deliveryMutation = useMutation({
     mutationFn: updateDeliveryInfo,
@@ -170,7 +171,7 @@ export function CaseMatrixPage() {
   };
 
   const tableColumns = useMemo(
-    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjects, openDeliveryEditor),
+    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjects, openDeliveryEditor, openEditProject),
     [matrixQuery.data?.columns, canManageProjects]
   );
 
@@ -230,7 +231,15 @@ export function CaseMatrixPage() {
           expandable={{
             expandedRowKeys: activeExpandedRowKeys,
             onExpandedRowsChange: (keys) => setExpandedRowKeys([...keys]),
-            indentSize: 14
+            indentSize: 14,
+            expandIcon: (props) => (
+              <MatrixExpandIcon
+                {...props}
+                canManageProjects={canManageProjects}
+                deleteLoading={deleteMutation.isPending}
+                onDelete={(row) => deleteMutation.mutate(row.project_case_id)}
+              />
+            )
           }}
           rowClassName={(row) => {
             const classes = [
@@ -300,11 +309,77 @@ export function CaseMatrixPage() {
   );
 }
 
+type MatrixExpandIconProps = {
+  expanded: boolean;
+  record: MatrixRow;
+  onExpand: (record: MatrixRow, event: MouseEvent<HTMLElement>) => void;
+  canManageProjects: boolean;
+  deleteLoading: boolean;
+  onDelete: (row: MatrixRow) => void;
+};
+
+function MatrixExpandIcon({
+  expanded,
+  record,
+  onExpand,
+  canManageProjects,
+  deleteLoading,
+  onDelete
+}: MatrixExpandIconProps) {
+  if (record.row_type !== 'project') {
+    return <span className="matrix-expand-spacer" />;
+  }
+
+  const projectName = String(record.cells.case_name?.value ?? '项目');
+  const hasChildren = Boolean(record.children?.length);
+
+  return (
+    <span className="matrix-row-action-stack">
+      {hasChildren ? (
+        <Tooltip title={expanded ? '折叠子项目' : '展开子项目'}>
+          <Button
+            type="text"
+            size="small"
+            className="matrix-row-action-button"
+            icon={expanded ? <MinusOutlined /> : <PlusOutlined />}
+            aria-label={expanded ? '折叠子项目' : '展开子项目'}
+            onClick={(event) => onExpand(record, event)}
+          />
+        </Tooltip>
+      ) : (
+        <span className="matrix-row-action-placeholder" />
+      )}
+      {canManageProjects && (
+        <Popconfirm
+          title="删除项目"
+          description={`确认删除「${projectName}」？会同时删除子项目、任务、日报和异常。`}
+          okText="删除"
+          cancelText="取消"
+          okButtonProps={{ danger: true, loading: deleteLoading }}
+          onConfirm={() => onDelete(record)}
+        >
+          <Button
+            type="text"
+            size="small"
+            danger
+            className="matrix-row-action-button"
+            icon={<DeleteOutlined />}
+            aria-label="删除项目"
+            loading={deleteLoading}
+            onClick={(event) => event.stopPropagation()}
+          />
+        </Popconfirm>
+      )}
+    </span>
+  );
+}
+
 function buildColumns(
   columns: MatrixColumn[],
   openTask: (taskId: string) => void,
   canManageProjects: boolean,
-  onEditDelivery: (row: MatrixRow) => void
+  onEditDelivery: (row: MatrixRow) => void,
+  onEditProject: (projectCaseId: string) => void
 ): ColumnsType<MatrixRow> {
   const leftColumns = columns
     .filter((column) => column.frozen === 'left')
@@ -313,9 +388,9 @@ function buildColumns(
       dataIndex: column.key,
       key: column.key,
       fixed: 'left' as const,
-      width: column.key === 'case_name' ? 220 : 190,
+      width: column.key === 'case_name' ? 250 : 190,
       className: `matrix-fixed-left matrix-column-${column.key}`,
-      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row)
+      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row, { canManageProjects, onEditProject })
     }));
 
   const rightColumns = columns
@@ -327,7 +402,7 @@ function buildColumns(
       fixed: 'right' as const,
       width: 70,
       className: 'matrix-fixed-right',
-      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row)
+      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row, { canManageProjects, onEditProject })
     }));
 
   const groups = new Map<string, MatrixColumn[]>();
@@ -374,7 +449,11 @@ function matrixColumnWidth(column: MatrixColumn) {
   return 96;
 }
 
-function renderPinnedCell(key: string, row: MatrixRow) {
+function renderPinnedCell(
+  key: string,
+  row: MatrixRow,
+  context: { canManageProjects: boolean; onEditProject: (projectCaseId: string) => void }
+) {
   const cell = row.cells[key];
   const value = cell?.value;
   if (key === 'open_exception_count') {
@@ -389,7 +468,11 @@ function renderPinnedCell(key: string, row: MatrixRow) {
     return (
       <Space direction="vertical" size={0} className="matrix-row-title">
         <div className="matrix-project-title-line">
-          <EllipsisText text={text} strong={row.row_type === 'project'} />
+          {row.row_type === 'project' && context.canManageProjects ? (
+            <ProjectTitleButton text={text} onClick={() => context.onEditProject(row.project_case_id)} />
+          ) : (
+            <EllipsisText text={text} strong={row.row_type === 'project'} />
+          )}
         </div>
         {row.row_type === 'project' && cell?.ownerName && (
           <EllipsisText text={cell.ownerName} type="secondary" />
@@ -440,6 +523,18 @@ function DeliveryInfoCell({
 function stringCellValue(cell: MatrixCell | undefined) {
   const value = cell?.value;
   return value === null || value === undefined ? null : String(value);
+}
+
+function ProjectTitleButton({ text, onClick }: { text: string; onClick: () => void }) {
+  const content = (
+    <button type="button" className="matrix-project-title-button" onClick={onClick}>
+      <Typography.Text strong className="matrix-ellipsis-text">
+        {text}
+      </Typography.Text>
+    </button>
+  );
+  if (!text || text === '-') return content;
+  return <Tooltip title={`${text}（点击编辑）`}>{content}</Tooltip>;
 }
 
 type EllipsisTextProps = {
