@@ -346,11 +346,13 @@ function importProject(project: ParsedProject, sourceSheet: string) {
   const businessOwnerId = ensureEmployee(project.businessOwnerName, 'dept-business', 'business_owner');
   const designOwnerId = ensureEmployee(project.designOwnerName, 'dept-design', 'design_owner');
   const status = project.totalProgress >= 100 ? 'completed' : project.totalProgress > 0 ? 'in_progress' : 'not_started';
+  const deliveryStatus = normalizeDeliveryStatus(project.deliveryStatus);
+  const deliveryRemark = normalizeDeliveryRemark(deliveryStatus, project.deliveryStatus);
 
   db.prepare(
     `INSERT INTO project_case
-     (id, code, name, category, customer_name, business_owner_id, design_owner_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, associated_month, source_sheet, source_row, source_seq)
-     VALUES (@id, @code, @name, '', '', @business_owner_id, @design_owner_id, @estimated_weight, 'T', @status, @total_progress, @delivery_date, @delivery_status, @associated_month, @source_sheet, @source_row, @source_seq)
+     (id, code, name, category, customer_name, business_owner_id, design_owner_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, delivery_remark, associated_month, source_sheet, source_row, source_seq)
+     VALUES (@id, @code, @name, '', '', @business_owner_id, @design_owner_id, @estimated_weight, 'T', @status, @total_progress, @delivery_date, @delivery_status, @delivery_remark, @associated_month, @source_sheet, @source_row, @source_seq)
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name,
        business_owner_id = excluded.business_owner_id,
@@ -360,6 +362,7 @@ function importProject(project: ParsedProject, sourceSheet: string) {
        total_progress = excluded.total_progress,
        delivery_date = excluded.delivery_date,
        delivery_status = excluded.delivery_status,
+       delivery_remark = excluded.delivery_remark,
        associated_month = excluded.associated_month,
        source_sheet = excluded.source_sheet,
        source_row = excluded.source_row,
@@ -374,7 +377,8 @@ function importProject(project: ParsedProject, sourceSheet: string) {
     status,
     total_progress: project.totalProgress,
     delivery_date: project.deliveryDate,
-    delivery_status: project.deliveryStatus,
+    delivery_status: deliveryStatus,
+    delivery_remark: deliveryRemark,
     associated_month: project.associatedMonth,
     source_sheet: sourceSheet,
     source_row: project.sourceRow,
@@ -416,6 +420,7 @@ function importProject(project: ParsedProject, sourceSheet: string) {
   for (const item of project.items) {
     importItem(projectId, item);
   }
+  updateImportedProjectDeliverySummary(projectId);
 }
 
 function importItem(projectId: string, item: ParsedItem) {
@@ -424,11 +429,13 @@ function importItem(projectId: string, item: ParsedItem) {
     .get(projectId, item.sourceRow) as { id: string } | undefined;
   const itemId = existingItem?.id ?? `ITEM-IMPORT-${item.sourceRow}`;
   const itemStatus = item.progress >= 100 ? 'completed' : item.progress > 0 ? 'in_progress' : 'not_started';
+  const deliveryStatus = normalizeDeliveryStatus(item.deliveryStatus);
+  const deliveryRemark = normalizeDeliveryRemark(deliveryStatus, item.deliveryStatus);
 
   db.prepare(
     `INSERT INTO case_item
-     (id, project_case_id, name, category, quantity, quantity_unit, piece_count, weight, weight_unit, status, progress, delivery_date, delivery_status, source_row)
-     VALUES (@id, @project_case_id, @name, '', @quantity, @quantity_unit, @piece_count, null, 'T', @status, @progress, @delivery_date, @delivery_status, @source_row)
+     (id, project_case_id, name, category, quantity, quantity_unit, piece_count, weight, weight_unit, status, progress, delivery_date, delivery_status, delivery_remark, source_row)
+     VALUES (@id, @project_case_id, @name, '', @quantity, @quantity_unit, @piece_count, null, 'T', @status, @progress, @delivery_date, @delivery_status, @delivery_remark, @source_row)
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name,
        quantity = excluded.quantity,
@@ -438,6 +445,7 @@ function importItem(projectId: string, item: ParsedItem) {
        progress = excluded.progress,
        delivery_date = excluded.delivery_date,
        delivery_status = excluded.delivery_status,
+       delivery_remark = excluded.delivery_remark,
        source_row = excluded.source_row`
   ).run({
     id: itemId,
@@ -449,7 +457,8 @@ function importItem(projectId: string, item: ParsedItem) {
     status: itemStatus,
     progress: item.progress,
     delivery_date: item.deliveryDate,
-    delivery_status: item.deliveryStatus,
+    delivery_status: deliveryStatus,
+    delivery_remark: deliveryRemark,
     source_row: item.sourceRow
   });
 
@@ -702,6 +711,56 @@ function taskProgress(itemTask: ParsedItemTask) {
 
 function roundProgress(value: number) {
   return Math.round(value * 10) / 10;
+}
+
+type DeliveryStatus = '已发货' | '未发货' | '待发货' | '发货中' | '其他';
+const DELIVERY_STATUS_VALUES: DeliveryStatus[] = ['已发货', '未发货', '待发货', '发货中', '其他'];
+
+function normalizeDeliveryStatus(value: string | null | undefined): DeliveryStatus | null {
+  const text = value?.trim();
+  if (!text) return null;
+  if (DELIVERY_STATUS_VALUES.includes(text as DeliveryStatus)) return text as DeliveryStatus;
+  if (text.includes('部分') || text.includes('确认')) return '其他';
+  if (text.includes('发货中')) return '发货中';
+  if (text.includes('已出货') || text.includes('已发') || text.includes('已完成') || text.includes('完成')) return '已发货';
+  if (text.includes('待')) return '待发货';
+  if (text.includes('未')) return '未发货';
+  return '其他';
+}
+
+function normalizeDeliveryRemark(status: DeliveryStatus | null, rawStatus: string | null | undefined) {
+  const raw = rawStatus?.trim();
+  if (status !== '其他' || !raw || DELIVERY_STATUS_VALUES.includes(raw as DeliveryStatus)) return null;
+  return raw;
+}
+
+function updateImportedProjectDeliverySummary(projectId: string) {
+  const items = db.prepare('SELECT delivery_status, delivery_remark FROM case_item WHERE project_case_id = ?').all(projectId) as Array<{
+    delivery_status: string | null;
+    delivery_remark: string | null;
+  }>;
+  const summary = aggregateDeliveryStatus(items);
+  db.prepare('UPDATE project_case SET delivery_status = ?, delivery_remark = ? WHERE id = ?').run(summary.status, summary.remark, projectId);
+}
+
+function aggregateDeliveryStatus(items: Array<{ delivery_status: string | null; delivery_remark?: string | null }>) {
+  if (items.length === 0) return { status: null as DeliveryStatus | null, remark: null as string | null };
+  const statuses = items.map((item) => normalizeDeliveryStatus(item.delivery_status) ?? '未发货');
+  if (statuses.every((status) => status === '已发货')) return { status: '已发货' as DeliveryStatus, remark: null };
+  if (statuses.some((status) => status === '其他')) {
+    const remark = items
+      .filter((item) => (normalizeDeliveryStatus(item.delivery_status) ?? '未发货') === '其他')
+      .map((item) => item.delivery_remark?.trim() || normalizeDeliveryRemark('其他', item.delivery_status))
+      .filter((value): value is string => Boolean(value))
+      .slice(0, 3)
+      .join('；');
+    return { status: '其他' as DeliveryStatus, remark: remark || '存在其他发货情况' };
+  }
+  if (statuses.some((status) => status === '发货中') || statuses.some((status) => status === '已发货')) {
+    return { status: '发货中' as DeliveryStatus, remark: null };
+  }
+  if (statuses.some((status) => status === '待发货')) return { status: '待发货' as DeliveryStatus, remark: null };
+  return { status: '未发货' as DeliveryStatus, remark: null };
 }
 
 function stableId(prefix: string, seed: string) {

@@ -1,5 +1,6 @@
 import { CompressOutlined, DeleteOutlined, EditOutlined, ExpandAltOutlined, MinusOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import { Button, Card, Divider, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import type { TableProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
@@ -12,6 +13,20 @@ import { getAuthSession } from '../../services/auth';
 import type { LookupResponse, MatrixCell, MatrixColumn, MatrixRow, ProjectCase, ProjectStageOwner } from '../../types';
 
 const STAGE_COLORS = ['blue', 'cyan', 'green', 'lime', 'gold', 'orange', 'purple'];
+const DELIVERY_STATUS_OPTIONS = [
+  { label: '已发货', value: '已发货' },
+  { label: '未发货', value: '未发货' },
+  { label: '待发货', value: '待发货' },
+  { label: '发货中', value: '发货中' },
+  { label: '其他', value: '其他' }
+];
+const DELIVERY_STATUS_COLORS: Record<string, string> = {
+  已发货: 'success',
+  未发货: 'default',
+  待发货: 'warning',
+  发货中: 'processing',
+  其他: 'purple'
+};
 
 type ProjectCaseFormValues = ProjectCasePayload & {
   stage_owner_values?: Record<string, string | null | undefined>;
@@ -22,6 +37,7 @@ type StageDefinition = Pick<ProjectStageOwner, 'task_type' | 'task_name' | 'gene
 type DeliveryFormValues = {
   delivery_date?: string | null;
   delivery_status?: string | null;
+  delivery_remark?: string | null;
 };
 
 type DeliveryEditorTarget = {
@@ -37,11 +53,13 @@ export function CaseMatrixPage() {
   const [deliveryEditor, setDeliveryEditor] = useState<DeliveryEditorTarget | null>(null);
   const [expandedRowKeys, setExpandedRowKeys] = useState<Key[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<string>();
   const [projectManagementOpen, setProjectManagementOpen] = useState(false);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectCase | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const queryClient = useQueryClient();
+  const watchedDeliveryStatus = Form.useWatch('delivery_status', deliveryForm);
   const currentUser = getAuthSession()?.user;
   const canManageProjects = Boolean(
     currentUser?.role === 'admin' ||
@@ -60,8 +78,8 @@ export function CaseMatrixPage() {
   const projectRowKeys = useMemo(() => rows.filter((row) => row.row_type === 'project').map((row) => row.row_id ?? row.case_item_id), [rows]);
   const stageDefinitions = useMemo(() => stageDefinitionsFromColumns(matrixQuery.data?.columns ?? []), [matrixQuery.data?.columns]);
 
-  const filteredRows = useMemo(() => filterRows(rows, searchKeyword), [rows, searchKeyword]);
-  const activeExpandedRowKeys = searchKeyword.trim()
+  const filteredRows = useMemo(() => filterRows(rows, searchKeyword, deliveryStatusFilter), [rows, searchKeyword, deliveryStatusFilter]);
+  const activeExpandedRowKeys = searchKeyword.trim() || deliveryStatusFilter
     ? filteredRows.filter((row) => row.row_type === 'project').map((row) => row.row_id ?? row.case_item_id)
     : expandedRowKeys;
   const hasManualExpandedRows = expandedRowKeys.length > 0;
@@ -116,7 +134,7 @@ export function CaseMatrixPage() {
     setProjectManagementOpen(false);
     setEditingProject(null);
     form.resetFields();
-    form.setFieldsValue({ associated_month: currentMonth(), items: [{ name: '' }] });
+    form.setFieldsValue({ associated_month: currentMonth(), items: [{ name: '', delivery_date: null, delivery_status: null, delivery_remark: null }] });
     setProjectModalOpen(true);
   };
   const openProjectManagement = () => {
@@ -147,18 +165,17 @@ export function CaseMatrixPage() {
     }
   };
   const openDeliveryEditor = (row: MatrixRow) => {
-    if (!canManageProjects) return;
-    const title = row.row_type === 'project'
-      ? String(row.cells.case_name?.value ?? '项目')
-      : String(row.cells.case_item_name?.value ?? '子项目');
+    if (!canManageProjects || row.row_type !== 'item') return;
+    const title = String(row.cells.project_item_name?.value ?? row.cells.case_item_name?.value ?? '子项目');
     setDeliveryEditor({
       project_case_id: row.project_case_id,
-      case_item_id: row.row_type === 'project' ? null : row.case_item_id,
+      case_item_id: row.case_item_id,
       title
     });
     deliveryForm.setFieldsValue({
       delivery_date: stringCellValue(row.cells.delivery_date),
-      delivery_status: stringCellValue(row.cells.delivery_status)
+      delivery_status: stringCellValue(row.cells.delivery_status),
+      delivery_remark: row.cells.delivery_status?.deliveryRemark ?? null
     });
   };
   const submitDeliveryForm = (values: DeliveryFormValues) => {
@@ -166,14 +183,19 @@ export function CaseMatrixPage() {
     deliveryMutation.mutate({
       ...deliveryEditor,
       delivery_date: values.delivery_date ?? null,
-      delivery_status: values.delivery_status ?? null
+      delivery_status: values.delivery_status ?? null,
+      delivery_remark: values.delivery_status === '其他' ? values.delivery_remark ?? null : null
     });
   };
 
   const tableColumns = useMemo(
-    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjects, openDeliveryEditor, openEditProject),
-    [matrixQuery.data?.columns, canManageProjects]
+    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjects, openDeliveryEditor, openEditProject, deliveryStatusFilter),
+    [matrixQuery.data?.columns, canManageProjects, deliveryStatusFilter]
   );
+  const handleTableChange: TableProps<MatrixRow>['onChange'] = (_pagination, filters) => {
+    const next = Array.isArray(filters.delivery_status) ? filters.delivery_status[0] : undefined;
+    setDeliveryStatusFilter(typeof next === 'string' ? next : undefined);
+  };
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -228,6 +250,7 @@ export function CaseMatrixPage() {
           sticky
           tableLayout="fixed"
           scroll={{ x: 2700, y: 'calc(100vh - 178px)' }}
+          onChange={handleTableChange}
           expandable={{
             expandedRowKeys: activeExpandedRowKeys,
             onExpandedRowsChange: (keys) => setExpandedRowKeys([...keys]),
@@ -277,8 +300,13 @@ export function CaseMatrixPage() {
             <Input placeholder="YYYY-MM-DD" />
           </Form.Item>
           <Form.Item label="发货情况" name="delivery_status">
-            <Input placeholder="例如 已出货 / 部分待确认" />
+            <Select allowClear placeholder="请选择发货情况" options={DELIVERY_STATUS_OPTIONS} />
           </Form.Item>
+          {watchedDeliveryStatus === '其他' && (
+            <Form.Item label="备注" name="delivery_remark">
+              <Input.TextArea placeholder="补充说明其他发货情况" autoSize={{ minRows: 2, maxRows: 4 }} />
+            </Form.Item>
+          )}
         </Form>
       </Modal>
       <ProjectManagementModal
@@ -379,7 +407,8 @@ function buildColumns(
   openTask: (taskId: string) => void,
   canManageProjects: boolean,
   onEditDelivery: (row: MatrixRow) => void,
-  onEditProject: (projectCaseId: string) => void
+  onEditProject: (projectCaseId: string) => void,
+  deliveryStatusFilter?: string
 ): ColumnsType<MatrixRow> {
   const leftColumns = columns
     .filter((column) => column.frozen === 'left')
@@ -388,7 +417,7 @@ function buildColumns(
       dataIndex: column.key,
       key: column.key,
       fixed: 'left' as const,
-      width: column.key === 'case_name' ? 250 : 190,
+      width: column.key === 'project_item_name' ? 380 : column.key === 'case_name' ? 250 : 190,
       className: `matrix-fixed-left matrix-column-${column.key}`,
       render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row, { canManageProjects, onEditProject })
     }));
@@ -418,21 +447,31 @@ function buildColumns(
       key: group,
       className: `matrix-stage-group stage-${stageColor}`,
       onHeaderCell: () => ({ className: `matrix-stage-header stage-${stageColor}` }),
-      children: children.map((child) => ({
-        title: child.title,
-        key: child.key,
-        width: matrixColumnWidth(child),
-        align: isPlainMatrixColumn(child) ? 'left' as const : 'center' as const,
-        className: `matrix-stage-cell stage-${stageColor}`,
-        onHeaderCell: () => ({ className: `matrix-substage-header stage-${stageColor}` }),
-        onCell: () => ({ className: `matrix-stage-cell stage-${stageColor}` }),
-        render: (_value: unknown, row: MatrixRow) => {
-          if (row.row_type === 'month') return <span className="matrix-month-spacer" />;
-          return isPlainMatrixColumn(child)
-            ? <DeliveryInfoCell columnKey={child.key} row={row} editable={canManageProjects} onEdit={onEditDelivery} />
-            : <ProgressCell cell={row.cells[child.key]} onOpenTask={openTask} />;
-        }
-      }))
+      children: children.map((child) => {
+        const column = {
+          title: child.title,
+          key: child.key,
+          width: matrixColumnWidth(child),
+          align: isPlainMatrixColumn(child) ? 'left' as const : 'center' as const,
+          className: `matrix-stage-cell stage-${stageColor}`,
+          onHeaderCell: () => ({ className: `matrix-substage-header stage-${stageColor}` }),
+          onCell: () => ({ className: `matrix-stage-cell stage-${stageColor}` }),
+          render: (_value: unknown, row: MatrixRow) => {
+            if (row.row_type === 'month') return <span className="matrix-month-spacer" />;
+            return isPlainMatrixColumn(child)
+              ? <DeliveryInfoCell columnKey={child.key} row={row} editable={canManageProjects} onEdit={onEditDelivery} />
+              : <ProgressCell cell={row.cells[child.key]} onOpenTask={openTask} />;
+          }
+        };
+        if (child.key !== 'delivery_status') return column;
+        return {
+          ...column,
+          filters: DELIVERY_STATUS_OPTIONS.map((option) => ({ text: option.label, value: option.value })),
+          filteredValue: deliveryStatusFilter ? [deliveryStatusFilter] : null,
+          filterMultiple: false,
+          onFilter: () => true
+        };
+      })
     };
   });
 
@@ -459,6 +498,37 @@ function renderPinnedCell(
   if (key === 'open_exception_count') {
     const count = Number(value ?? 0);
     return count > 0 ? <Tag color="red">{count}</Tag> : <span className="empty-cell">0</span>;
+  }
+  if (key === 'project_item_name') {
+    if (row.row_type === 'month') {
+      const meta = stringCellValue(row.cells.case_item_name) ?? '';
+      return (
+        <Space direction="vertical" size={0} className="matrix-row-title">
+          <Typography.Text strong className="matrix-month-title">{value ? String(value) : '未分类'}</Typography.Text>
+          {meta && <Typography.Text type="secondary" className="matrix-month-meta">{meta}</Typography.Text>}
+        </Space>
+      );
+    }
+    const text = value ? String(value) : '-';
+    const shipped = stringCellValue(row.cells.delivery_status) === '已发货';
+    const secondary = row.row_type === 'project'
+      ? [cell?.ownerName, typeof cell?.aggregateCount === 'number' ? `${cell.aggregateCount} 个子项目` : null].filter(Boolean).join(' · ')
+      : typeof cell?.aggregateCount === 'number'
+        ? `${cell.aggregateCount}%`
+        : '';
+    return (
+      <Space direction="vertical" size={0} className="matrix-row-title">
+        <div className="matrix-project-title-line">
+          {shipped && <Tag color="success" className="matrix-shipped-tag">已发货</Tag>}
+          {row.row_type === 'project' && context.canManageProjects ? (
+            <ProjectTitleButton text={text} onClick={() => context.onEditProject(row.project_case_id)} />
+          ) : (
+            <EllipsisText text={text} strong={row.row_type === 'project'} />
+          )}
+        </div>
+        {secondary && <EllipsisText text={secondary} type="secondary" />}
+      </Space>
+    );
   }
   if (key === 'case_name') {
     if (row.row_type === 'month') {
@@ -508,9 +578,15 @@ function DeliveryInfoCell({
   editable: boolean;
   onEdit: (row: MatrixRow) => void;
 }) {
-  const value = row.cells[columnKey]?.value;
-  const content = value ? <EllipsisText text={String(value)} /> : <span className="empty-cell">-</span>;
-  if (!editable) return content;
+  const cell = row.cells[columnKey];
+  const value = cell?.value;
+  const content = columnKey === 'delivery_status'
+    ? <DeliveryStatusDisplay status={value ? String(value) : ''} remark={cell?.deliveryRemark ?? null} />
+    : value
+      ? <EllipsisText text={String(value)} />
+      : <span className="empty-cell">-</span>;
+  const canEditCell = editable && row.row_type === 'item';
+  if (!canEditCell) return content;
   return (
     <Tooltip title="点击编辑发货信息">
       <button type="button" className="matrix-editable-text-cell" onClick={() => onEdit(row)}>
@@ -518,6 +594,15 @@ function DeliveryInfoCell({
       </button>
     </Tooltip>
   );
+}
+
+function DeliveryStatusDisplay({ status, remark }: { status: string; remark?: string | null }) {
+  if (!status) return <span className="empty-cell">-</span>;
+  const tag = <Tag color={DELIVERY_STATUS_COLORS[status] ?? 'default'}>{status}</Tag>;
+  if (status === '其他' && remark) {
+    return <Tooltip title={remark}>{tag}</Tooltip>;
+  }
+  return tag;
 }
 
 function stringCellValue(cell: MatrixCell | undefined) {
@@ -558,9 +643,9 @@ function EllipsisText({ text, strong, type, className }: EllipsisTextProps) {
   return <Tooltip title={text}>{content}</Tooltip>;
 }
 
-function filterRows(rows: MatrixRow[], keyword: string) {
+function filterRows(rows: MatrixRow[], keyword: string, deliveryStatus?: string) {
   const normalizedKeyword = keyword.trim().toLowerCase();
-  if (!normalizedKeyword) return rows;
+  if (!normalizedKeyword && !deliveryStatus) return rows;
   const matchedRows: MatrixRow[] = [];
   let currentMonthRow: MatrixRow | null = null;
   let currentMonthMatched = false;
@@ -575,8 +660,9 @@ function filterRows(rows: MatrixRow[], keyword: string) {
       currentMonthMatched = false;
       continue;
     }
-    const children = row.children?.filter((child) => rowMatches(child, normalizedKeyword)) ?? [];
-    if (rowMatches(row, normalizedKeyword) || children.length > 0) {
+    const children = row.children?.filter((child) => rowMatches(child, normalizedKeyword) && rowMatchesDeliveryStatus(child, deliveryStatus)) ?? [];
+    const rowMatched = rowMatches(row, normalizedKeyword) && rowMatchesDeliveryStatus(row, deliveryStatus);
+    if (rowMatched || children.length > 0) {
       appendMonthIfNeeded();
       matchedRows.push({ ...row, children: children.length > 0 ? children : row.children });
     }
@@ -585,10 +671,16 @@ function filterRows(rows: MatrixRow[], keyword: string) {
 }
 
 function rowMatches(row: MatrixRow, keyword: string) {
+  if (!keyword) return true;
   return Object.values(row.cells).some((cell: MatrixCell) => {
-    const values = [cell.value, cell.ownerName, cell.departmentName];
+    const values = [cell.value, cell.ownerName, cell.departmentName, cell.deliveryRemark];
     return values.some((value) => String(value ?? '').toLowerCase().includes(keyword));
   });
+}
+
+function rowMatchesDeliveryStatus(row: MatrixRow, deliveryStatus?: string) {
+  if (!deliveryStatus) return true;
+  return stringCellValue(row.cells.delivery_status) === deliveryStatus;
 }
 
 type ProjectManagementModalProps = {
@@ -767,9 +859,6 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
           <Form.Item label="交付日期" name="delivery_date">
             <Input placeholder="YYYY-MM-DD" />
           </Form.Item>
-          <Form.Item label="发货情况" name="delivery_status">
-            <Input placeholder="例如 已出货 / 部分待确认" />
-          </Form.Item>
         </div>
 
         <Divider orientation="left" plain>子项目发货信息</Divider>
@@ -780,6 +869,7 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
                 <Typography.Text type="secondary">子项目名称</Typography.Text>
                 <Typography.Text type="secondary">发货时间</Typography.Text>
                 <Typography.Text type="secondary">发货情况</Typography.Text>
+                <Typography.Text type="secondary">备注</Typography.Text>
               </div>
               {fields.map((field) => (
                 <div className="project-item-row" key={field.key}>
@@ -798,7 +888,10 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
                     <Input placeholder="YYYY-MM-DD" />
                   </Form.Item>
                   <Form.Item name={[field.name, 'delivery_status']} style={{ margin: 0 }}>
-                    <Input placeholder="已出货 / 待确认" />
+                    <Select allowClear placeholder="发货情况" options={DELIVERY_STATUS_OPTIONS} />
+                  </Form.Item>
+                  <Form.Item name={[field.name, 'delivery_remark']} style={{ margin: 0 }}>
+                    <Input placeholder="其他备注" />
                   </Form.Item>
                   <Form.Item noStyle shouldUpdate>
                     {({ getFieldValue }) => {
@@ -824,7 +917,7 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
                   </Form.Item>
                 </div>
               ))}
-              <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ name: '', delivery_date: null, delivery_status: null })}>
+              <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ name: '', delivery_date: null, delivery_status: null, delivery_remark: null })}>
                 新增子项目
               </Button>
             </Space>
@@ -866,15 +959,15 @@ function projectToForm(project: ProjectCase): ProjectCaseFormValues {
     design_owner_id: project.design_owner_id ?? null,
     estimated_weight: project.estimated_weight ?? null,
     delivery_date: project.delivery_date ?? null,
-    delivery_status: project.delivery_status ?? null,
     items: project.items?.length
       ? project.items.map((item) => ({
           id: item.id,
           name: item.name,
           delivery_date: item.delivery_date ?? null,
-          delivery_status: item.delivery_status ?? null
+          delivery_status: item.delivery_status ?? null,
+          delivery_remark: item.delivery_remark ?? null
         }))
-      : [{ name: '', delivery_date: null, delivery_status: null }],
+      : [{ name: '', delivery_date: null, delivery_status: null, delivery_remark: null }],
     stage_owner_values: Object.fromEntries(
       (project.stage_owners ?? []).map((stage) => [stage.task_type, encodeOwnerValue(stage)])
     )
@@ -887,7 +980,8 @@ function normalizeProjectPayload(values: ProjectCaseFormValues, stages: StageDef
       id: item.id ?? null,
       name: item.name?.trim() ?? '',
       delivery_date: item.delivery_date ?? null,
-      delivery_status: item.delivery_status ?? null
+      delivery_status: item.delivery_status ?? null,
+      delivery_remark: item.delivery_status === '其他' ? item.delivery_remark ?? null : null
     }))
     .filter((item) => item.name);
   const stageOwners = stages.map((stage) => ({
@@ -906,7 +1000,6 @@ function normalizeProjectPayload(values: ProjectCaseFormValues, stages: StageDef
     design_owner_id: designOwner,
     estimated_weight: values.estimated_weight ?? null,
     delivery_date: values.delivery_date ?? null,
-    delivery_status: values.delivery_status ?? null,
     items,
     stage_owners: stageOwners
   };

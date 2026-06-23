@@ -183,6 +183,11 @@ body {
   min-width: 0;
 }
 
+.matrix-shipped-tag {
+  flex: none;
+  margin-inline-end: 0;
+}
+
 .matrix-project-title-button {
   width: 100%;
   min-width: 0;
@@ -415,14 +420,14 @@ body {
 
 .project-item-header {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 132px 180px 28px;
+  grid-template-columns: minmax(220px, 1fr) 132px 150px minmax(150px, 0.7fr) 28px;
   gap: 8px;
   padding-right: 2px;
 }
 
 .project-item-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 132px 180px 28px;
+  grid-template-columns: minmax(220px, 1fr) 132px 150px minmax(150px, 0.7fr) 28px;
   align-items: flex-start;
   gap: 8px;
   width: 100%;

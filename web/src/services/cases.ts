@@ -13,8 +13,9 @@ export type ProjectCasePayload = {
   estimated_weight?: number | null;
   delivery_date?: string | null;
   delivery_status?: string | null;
+  delivery_remark?: string | null;
   associated_month?: string | null;
-  items?: Array<{ id?: string | null; name: string; delivery_date?: string | null; delivery_status?: string | null }>;
+  items?: Array<{ id?: string | null; name: string; delivery_date?: string | null; delivery_status?: string | null; delivery_remark?: string | null }>;
   stage_owners?: Array<{ task_type: string; assignee_id?: string | null; team_id?: string | null }>;
 };
 
@@ -32,6 +33,7 @@ export type DeliveryInfoPayload = {
   case_item_id?: string | null;
   delivery_date?: string | null;
   delivery_status?: string | null;
+  delivery_remark?: string | null;
 };
 
 export const updateDeliveryInfo = (payload: DeliveryInfoPayload) =>

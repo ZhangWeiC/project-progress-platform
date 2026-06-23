@@ -112,6 +112,7 @@ export function initializeDatabase() {
       total_progress REAL NOT NULL DEFAULT 0,
       delivery_date TEXT,
       delivery_status TEXT,
+      delivery_remark TEXT,
       associated_month TEXT,
       source_sheet TEXT,
       source_row INTEGER,
@@ -134,6 +135,7 @@ export function initializeDatabase() {
       progress REAL NOT NULL DEFAULT 0,
       delivery_date TEXT,
       delivery_status TEXT,
+      delivery_remark TEXT,
       source_row INTEGER,
       FOREIGN KEY (project_case_id) REFERENCES project_case(id)
     );
@@ -392,6 +394,7 @@ export function initializeDatabase() {
   migratePermissionModel();
   migrateFeishuIdentityColumns();
   migrateProjectAssociatedMonth();
+  migrateDeliveryStatusModel();
   seedDatabase();
   hideLegacyLocalDepartments();
   seedCredentials();
@@ -529,6 +532,53 @@ function migrateProjectAssociatedMonth() {
   tx(rows);
 }
 
+function migrateDeliveryStatusModel() {
+  addColumnIfMissing('project_case', 'delivery_remark', 'TEXT');
+  addColumnIfMissing('case_item', 'delivery_remark', 'TEXT');
+  normalizeDeliveryStatusRows('project_case');
+  normalizeDeliveryStatusRows('case_item');
+}
+
+function normalizeDeliveryStatusRows(table: 'project_case' | 'case_item') {
+  const rows = db.prepare(`SELECT id, delivery_status, delivery_remark FROM ${table}`).all() as Array<{
+    id: string;
+    delivery_status: string | null;
+    delivery_remark: string | null;
+  }>;
+  const update = db.prepare(`UPDATE ${table} SET delivery_status = ?, delivery_remark = ? WHERE id = ?`);
+  const tx = db.transaction((items: typeof rows) => {
+    for (const row of items) {
+      const normalized = normalizeDeliveryStatusValue(row.delivery_status);
+      const remark = normalized === '其他' ? normalizeDeliveryRemarkValue(row.delivery_remark, row.delivery_status) : null;
+      const nextStatus = normalized || null;
+      if (nextStatus !== row.delivery_status || remark !== row.delivery_remark) {
+        update.run(nextStatus, remark, row.id);
+      }
+    }
+  });
+  tx(rows);
+}
+
+function normalizeDeliveryStatusValue(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text) return null;
+  if (['已发货', '未发货', '待发货', '发货中', '其他'].includes(text)) return text;
+  if (text.includes('部分') || text.includes('确认')) return '其他';
+  if (text.includes('发货中')) return '发货中';
+  if (text.includes('已出货') || text.includes('已发') || text.includes('已完成') || text.includes('完成')) return '已发货';
+  if (text.includes('待')) return '待发货';
+  if (text.includes('未')) return '未发货';
+  return '其他';
+}
+
+function normalizeDeliveryRemarkValue(remark: string | null | undefined, rawStatus: string | null | undefined) {
+  const normalizedRemark = remark?.trim();
+  if (normalizedRemark) return normalizedRemark;
+  const raw = rawStatus?.trim();
+  if (!raw || raw === '其他') return null;
+  return raw;
+}
+
 function normalizeMonthValue(value: string | null | undefined) {
   const text = value?.trim();
   if (!text) return null;
@@ -611,18 +661,18 @@ function seedDatabase() {
   if (existing.count > 0 || !shouldSeedDemoData()) return;
 
   insertMany('project_case', [
-    { id: 'CASE-202604-001', code: 'P-001', name: '惠增一标20M小箱梁中梁旧模板改造', category: '旧模板改造', customer_name: '', business_owner_id: 'user-zhang', design_owner_id: 'user-wei-li', estimated_weight: 15, weight_unit: 'T', status: 'completed', total_progress: 100, delivery_date: '2026-04-09', delivery_status: '已出货', associated_month: '2026-04', source_sheet: '总表', source_row: 9, source_seq: 1 },
-    { id: 'CASE-202604-002', code: 'P-002', name: '狮子洋通道工程3标护栏模板', category: '护栏模板', customer_name: '', business_owner_id: 'user-zhang', design_owner_id: 'user-rao', estimated_weight: 20, weight_unit: 'T', status: 'in_progress', total_progress: 86, delivery_date: '2026-04-23', delivery_status: '部分待确认', associated_month: '2026-04', source_sheet: '总表', source_row: 19, source_seq: 2 }
+    { id: 'CASE-202604-001', code: 'P-001', name: '惠增一标20M小箱梁中梁旧模板改造', category: '旧模板改造', customer_name: '', business_owner_id: 'user-zhang', design_owner_id: 'user-wei-li', estimated_weight: 15, weight_unit: 'T', status: 'completed', total_progress: 100, delivery_date: '2026-04-09', delivery_status: '已发货', delivery_remark: null, associated_month: '2026-04', source_sheet: '总表', source_row: 9, source_seq: 1 },
+    { id: 'CASE-202604-002', code: 'P-002', name: '狮子洋通道工程3标护栏模板', category: '护栏模板', customer_name: '', business_owner_id: 'user-zhang', design_owner_id: 'user-rao', estimated_weight: 20, weight_unit: 'T', status: 'in_progress', total_progress: 86, delivery_date: '2026-04-23', delivery_status: '其他', delivery_remark: '部分待确认', associated_month: '2026-04', source_sheet: '总表', source_row: 19, source_seq: 2 }
   ]);
 
   insertMany('case_item', [
-    { id: 'ITEM-001-01', project_case_id: 'CASE-202604-001', name: '主体拼模', category: '', quantity: null, quantity_unit: null, piece_count: null, weight: null, weight_unit: 'T', status: 'completed', progress: 100, delivery_date: '2026-04-09', delivery_status: '已出货', source_row: 9 },
-    { id: 'ITEM-001-02', project_case_id: 'CASE-202604-001', name: '正交横隔堵4件', category: '', quantity: 4, quantity_unit: '件', piece_count: 4, weight: null, weight_unit: 'T', status: 'completed', progress: 100, delivery_date: '2026-04-09', delivery_status: '已出货', source_row: 10 },
-    { id: 'ITEM-002-01', project_case_id: 'CASE-202604-002', name: 'M1*15件', category: '', quantity: 15, quantity_unit: '件', piece_count: 15, weight: null, weight_unit: 'T', status: 'completed', progress: 100, delivery_date: '2026-04-23', delivery_status: '已完成', source_row: 19 },
-    { id: 'ITEM-002-02', project_case_id: 'CASE-202604-002', name: 'M2*15件', category: '', quantity: 15, quantity_unit: '件', piece_count: 15, weight: null, weight_unit: 'T', status: 'completed', progress: 100, delivery_date: null, delivery_status: '', source_row: 20 },
-    { id: 'ITEM-002-05', project_case_id: 'CASE-202604-002', name: 'M9*30件', category: '', quantity: 30, quantity_unit: '件', piece_count: 30, weight: null, weight_unit: 'T', status: 'in_progress', progress: 92, delivery_date: null, delivery_status: '', source_row: 23 },
-    { id: 'ITEM-002-06', project_case_id: 'CASE-202604-002', name: 'M10*15件', category: '', quantity: 15, quantity_unit: '件', piece_count: 15, weight: null, weight_unit: 'T', status: 'in_progress', progress: 83, delivery_date: null, delivery_status: '', source_row: 24 },
-    { id: 'ITEM-002-09', project_case_id: 'CASE-202604-002', name: '配件', category: '', quantity: null, quantity_unit: null, piece_count: null, weight: null, weight_unit: 'T', status: 'in_progress', progress: 90, delivery_date: null, delivery_status: '', source_row: 29 }
+    { id: 'ITEM-001-01', project_case_id: 'CASE-202604-001', name: '主体拼模', category: '', quantity: null, quantity_unit: null, piece_count: null, weight: null, weight_unit: 'T', status: 'completed', progress: 100, delivery_date: '2026-04-09', delivery_status: '已发货', delivery_remark: null, source_row: 9 },
+    { id: 'ITEM-001-02', project_case_id: 'CASE-202604-001', name: '正交横隔堵4件', category: '', quantity: 4, quantity_unit: '件', piece_count: 4, weight: null, weight_unit: 'T', status: 'completed', progress: 100, delivery_date: '2026-04-09', delivery_status: '已发货', delivery_remark: null, source_row: 10 },
+    { id: 'ITEM-002-01', project_case_id: 'CASE-202604-002', name: 'M1*15件', category: '', quantity: 15, quantity_unit: '件', piece_count: 15, weight: null, weight_unit: 'T', status: 'completed', progress: 100, delivery_date: '2026-04-23', delivery_status: '已发货', delivery_remark: null, source_row: 19 },
+    { id: 'ITEM-002-02', project_case_id: 'CASE-202604-002', name: 'M2*15件', category: '', quantity: 15, quantity_unit: '件', piece_count: 15, weight: null, weight_unit: 'T', status: 'completed', progress: 100, delivery_date: null, delivery_status: null, delivery_remark: null, source_row: 20 },
+    { id: 'ITEM-002-05', project_case_id: 'CASE-202604-002', name: 'M9*30件', category: '', quantity: 30, quantity_unit: '件', piece_count: 30, weight: null, weight_unit: 'T', status: 'in_progress', progress: 92, delivery_date: null, delivery_status: null, delivery_remark: null, source_row: 23 },
+    { id: 'ITEM-002-06', project_case_id: 'CASE-202604-002', name: 'M10*15件', category: '', quantity: 15, quantity_unit: '件', piece_count: 15, weight: null, weight_unit: 'T', status: 'in_progress', progress: 83, delivery_date: null, delivery_status: null, delivery_remark: null, source_row: 24 },
+    { id: 'ITEM-002-09', project_case_id: 'CASE-202604-002', name: '配件', category: '', quantity: null, quantity_unit: null, piece_count: null, weight: null, weight_unit: 'T', status: 'in_progress', progress: 90, delivery_date: null, delivery_status: null, delivery_remark: null, source_row: 29 }
   ]);
 
   seedTasksForCases();

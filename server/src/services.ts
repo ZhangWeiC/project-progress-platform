@@ -217,6 +217,7 @@ export type ProjectCaseInput = {
   estimated_weight?: number | null;
   delivery_date?: string | null;
   delivery_status?: string | null;
+  delivery_remark?: string | null;
   associated_month?: string | null;
   items?: ProjectCaseItemInput[];
   stage_owners?: ProjectCaseStageOwnerInput[];
@@ -227,6 +228,7 @@ export type ProjectCaseItemInput = {
   name: string;
   delivery_date?: string | null;
   delivery_status?: string | null;
+  delivery_remark?: string | null;
 };
 
 export type ProjectCaseStageOwnerInput = {
@@ -240,6 +242,7 @@ export type DeliveryInfoInput = {
   case_item_id?: string | null;
   delivery_date?: string | null;
   delivery_status?: string | null;
+  delivery_remark?: string | null;
 };
 
 export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
@@ -256,12 +259,14 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
   const id = makeId('CASE');
   const maxSeq = db.prepare('SELECT COALESCE(MAX(source_seq), 0) as value FROM project_case').get() as { value: number };
   const deliveryDate = normalizeText(input.delivery_date);
+  const deliveryStatus = normalizeDeliveryStatus(input.delivery_status);
+  const deliveryRemark = normalizeDeliveryRemark(deliveryStatus, input.delivery_remark, input.delivery_status);
   const associatedMonth = normalizeAssociatedMonth(input.associated_month, deliveryDate);
   const tx = db.transaction(() => {
     db.prepare(
       `INSERT INTO project_case
-       (id, code, name, category, customer_name, business_owner_id, design_owner_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, associated_month, source_sheet, source_row, source_seq)
-       VALUES (@id, @code, @name, @category, @customer_name, @business_owner_id, @design_owner_id, @estimated_weight, 'T', 'in_progress', 0, @delivery_date, @delivery_status, @associated_month, 'manual', null, @source_seq)`
+       (id, code, name, category, customer_name, business_owner_id, design_owner_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, delivery_remark, associated_month, source_sheet, source_row, source_seq)
+       VALUES (@id, @code, @name, @category, @customer_name, @business_owner_id, @design_owner_id, @estimated_weight, 'T', 'in_progress', 0, @delivery_date, @delivery_status, @delivery_remark, @associated_month, 'manual', null, @source_seq)`
     ).run({
       id,
       code: normalizeText(input.code),
@@ -272,7 +277,8 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
       design_owner_id: input.design_owner_id ?? null,
       estimated_weight: input.estimated_weight ?? null,
       delivery_date: deliveryDate,
-      delivery_status: normalizeText(input.delivery_status),
+      delivery_status: deliveryStatus,
+      delivery_remark: deliveryRemark,
       associated_month: associatedMonth,
       source_seq: Number(maxSeq.value ?? 0) + 1
     });
@@ -282,6 +288,7 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
     if (input.stage_owners) applyStageOwners(id, input.stage_owners);
     syncTaskOwnerMembers(id);
     recalculateCase(id);
+    updateProjectDeliverySummary(id);
   });
   tx();
   return getProjectCaseManageProfile(id, user);
@@ -303,6 +310,12 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
   const nextBusinessOwnerId = input.business_owner_id === undefined ? existing.business_owner_id ?? null : input.business_owner_id ?? null;
   const nextDesignOwnerId = input.design_owner_id === undefined ? existing.design_owner_id ?? null : input.design_owner_id ?? null;
   const nextDeliveryDate = normalizeText(input.delivery_date === undefined ? existing.delivery_date : input.delivery_date);
+  const nextDeliveryStatus = normalizeDeliveryStatus(input.delivery_status === undefined ? existing.delivery_status : input.delivery_status);
+  const nextDeliveryRemark = normalizeDeliveryRemark(
+    nextDeliveryStatus,
+    input.delivery_remark === undefined ? existing.delivery_remark : input.delivery_remark,
+    input.delivery_status === undefined ? existing.delivery_status : input.delivery_status
+  );
   const nextAssociatedMonth = input.associated_month === undefined
     ? normalizeAssociatedMonth(existing.associated_month, nextDeliveryDate)
     : normalizeAssociatedMonth(input.associated_month, nextDeliveryDate);
@@ -318,6 +331,7 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
            estimated_weight = @estimated_weight,
            delivery_date = @delivery_date,
            delivery_status = @delivery_status,
+           delivery_remark = @delivery_remark,
            associated_month = @associated_month
        WHERE id = @id`
     ).run({
@@ -330,7 +344,8 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
       design_owner_id: nextDesignOwnerId,
       estimated_weight: input.estimated_weight === undefined ? existing.estimated_weight ?? null : input.estimated_weight ?? null,
       delivery_date: nextDeliveryDate,
-      delivery_status: normalizeText(input.delivery_status === undefined ? existing.delivery_status : input.delivery_status),
+      delivery_status: nextDeliveryStatus,
+      delivery_remark: nextDeliveryRemark,
       associated_month: nextAssociatedMonth
     });
     syncProjectOwnerMembers(projectCaseId, nextBusinessOwnerId, nextDesignOwnerId);
@@ -343,6 +358,7 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
     }
     syncTaskOwnerMembers(projectCaseId);
     recalculateCase(projectCaseId);
+    updateProjectDeliverySummary(projectCaseId);
   });
   tx();
   return getProjectCaseManageProfile(projectCaseId, user);
@@ -388,7 +404,8 @@ export function deleteProjectCase(projectCaseId: string, user: CurrentUser) {
 export function updateDeliveryInfo(input: DeliveryInfoInput, user: CurrentUser) {
   assertCanManageProjects(user);
   const deliveryDate = normalizeText(input.delivery_date);
-  const deliveryStatus = normalizeText(input.delivery_status);
+  const deliveryStatus = normalizeDeliveryStatus(input.delivery_status);
+  const deliveryRemark = normalizeDeliveryRemark(deliveryStatus, input.delivery_remark, input.delivery_status);
   if (input.case_item_id) {
     const item = db.prepare('SELECT id FROM case_item WHERE id = ? AND project_case_id = ?').get(input.case_item_id, input.project_case_id);
     if (!item) {
@@ -396,7 +413,13 @@ export function updateDeliveryInfo(input: DeliveryInfoInput, user: CurrentUser) 
       err.name = 'NOT_FOUND';
       throw err;
     }
-    db.prepare('UPDATE case_item SET delivery_date = ?, delivery_status = ? WHERE id = ?').run(deliveryDate, deliveryStatus, input.case_item_id);
+    db.prepare('UPDATE case_item SET delivery_date = ?, delivery_status = ?, delivery_remark = ? WHERE id = ?').run(
+      deliveryDate,
+      deliveryStatus,
+      deliveryRemark,
+      input.case_item_id
+    );
+    updateProjectDeliverySummary(input.project_case_id);
     return { ok: true };
   }
 
@@ -406,7 +429,8 @@ export function updateDeliveryInfo(input: DeliveryInfoInput, user: CurrentUser) 
     err.name = 'NOT_FOUND';
     throw err;
   }
-  db.prepare('UPDATE project_case SET delivery_date = ?, delivery_status = ? WHERE id = ?').run(deliveryDate, deliveryStatus, input.project_case_id);
+  db.prepare('UPDATE project_case SET delivery_date = ? WHERE id = ?').run(deliveryDate, input.project_case_id);
+  updateProjectDeliverySummary(input.project_case_id);
   return { ok: true };
 }
 
@@ -425,7 +449,7 @@ export function getProjectCaseManageProfile(projectCaseId: string, user: Current
     throw err;
   }
   const items = db
-    .prepare('SELECT id, name, progress, status, delivery_date, delivery_status, source_row FROM case_item WHERE project_case_id = ? ORDER BY source_row, id')
+    .prepare('SELECT id, name, progress, status, delivery_date, delivery_status, delivery_remark, source_row FROM case_item WHERE project_case_id = ? ORDER BY source_row, id')
     .all(projectCaseId);
   return {
     ...project,
@@ -512,19 +536,27 @@ function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | un
         err.name = 'VALIDATION_ERROR';
         throw err;
       }
-      const existingItem = db.prepare('SELECT delivery_date, delivery_status FROM case_item WHERE id = ?').get(item.id) as
-        | { delivery_date: string | null; delivery_status: string | null }
+      const existingItem = db.prepare('SELECT delivery_date, delivery_status, delivery_remark FROM case_item WHERE id = ?').get(item.id) as
+        | { delivery_date: string | null; delivery_status: string | null; delivery_remark: string | null }
         | undefined;
+      const nextDeliveryStatus = normalizeDeliveryStatus(item.delivery_status === undefined ? existingItem?.delivery_status : item.delivery_status);
+      const nextDeliveryRemark = normalizeDeliveryRemark(
+        nextDeliveryStatus,
+        item.delivery_remark === undefined ? existingItem?.delivery_remark : item.delivery_remark,
+        item.delivery_status === undefined ? existingItem?.delivery_status : item.delivery_status
+      );
       db.prepare(
         `UPDATE case_item
          SET name = ?,
              delivery_date = ?,
-             delivery_status = ?
+             delivery_status = ?,
+             delivery_remark = ?
          WHERE id = ?`
       ).run(
         name,
         normalizeText(item.delivery_date === undefined ? existingItem?.delivery_date : item.delivery_date),
-        normalizeText(item.delivery_status === undefined ? existingItem?.delivery_status : item.delivery_status),
+        nextDeliveryStatus,
+        nextDeliveryRemark,
         item.id
       );
       retainedItemIds.add(item.id);
@@ -534,16 +566,19 @@ function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | un
 
     const itemId = makeId('ITEM');
     nextRow += 1;
+    const deliveryStatus = normalizeDeliveryStatus(item.delivery_status);
+    const deliveryRemark = normalizeDeliveryRemark(deliveryStatus, item.delivery_remark, item.delivery_status);
     db.prepare(
       `INSERT INTO case_item
-       (id, project_case_id, name, category, quantity, quantity_unit, piece_count, weight, weight_unit, status, progress, delivery_date, delivery_status, source_row)
-       VALUES (?, ?, ?, '', null, null, null, null, 'T', 'not_started', 0, ?, ?, ?)`
+       (id, project_case_id, name, category, quantity, quantity_unit, piece_count, weight, weight_unit, status, progress, delivery_date, delivery_status, delivery_remark, source_row)
+       VALUES (?, ?, ?, '', null, null, null, null, 'T', 'not_started', 0, ?, ?, ?, ?)`
     ).run(
       itemId,
       projectCaseId,
       name,
       normalizeText(item.delivery_date),
-      normalizeText(item.delivery_status),
+      deliveryStatus,
+      deliveryRemark,
       nextRow
     );
     retainedItemIds.add(itemId);
@@ -825,6 +860,72 @@ function normalizeText(value: string | null | undefined) {
   return normalized ? normalized : null;
 }
 
+const DELIVERY_STATUS_VALUES = ['已发货', '未发货', '待发货', '发货中', '其他'] as const;
+type DeliveryStatus = typeof DELIVERY_STATUS_VALUES[number];
+
+function normalizeDeliveryStatus(value: string | null | undefined): DeliveryStatus | null {
+  const text = normalizeText(value);
+  if (!text) return null;
+  if ((DELIVERY_STATUS_VALUES as readonly string[]).includes(text)) return text as DeliveryStatus;
+  if (text.includes('部分') || text.includes('确认')) return '其他';
+  if (text.includes('发货中')) return '发货中';
+  if (text.includes('已出货') || text.includes('已发') || text.includes('已完成') || text.includes('完成')) return '已发货';
+  if (text.includes('待')) return '待发货';
+  if (text.includes('未')) return '未发货';
+  return '其他';
+}
+
+function normalizeDeliveryRemark(
+  status: DeliveryStatus | null,
+  remark: string | null | undefined,
+  rawStatus?: string | null
+) {
+  if (status !== '其他') return null;
+  return normalizeText(remark) ?? preserveRawDeliveryRemark(rawStatus);
+}
+
+function preserveRawDeliveryRemark(value: string | null | undefined) {
+  const text = normalizeText(value);
+  if (!text || (DELIVERY_STATUS_VALUES as readonly string[]).includes(text)) return null;
+  return text;
+}
+
+function aggregateDeliveryStatus(items: Array<{ delivery_status: string | null; delivery_remark?: string | null }>) {
+  if (items.length === 0) return { status: null as DeliveryStatus | null, remark: null as string | null };
+  const statuses = items.map((item) => normalizeDeliveryStatus(item.delivery_status) ?? '未发货');
+  if (statuses.every((status) => status === '已发货')) return { status: '已发货' as DeliveryStatus, remark: null };
+  if (statuses.some((status) => status === '其他')) {
+    const remark = items
+      .filter((item) => (normalizeDeliveryStatus(item.delivery_status) ?? '未发货') === '其他')
+      .map((item) => normalizeText(item.delivery_remark) ?? preserveRawDeliveryRemark(item.delivery_status))
+      .filter((value): value is string => Boolean(value))
+      .slice(0, 3)
+      .join('；');
+    return { status: '其他' as DeliveryStatus, remark: remark || '存在其他发货情况' };
+  }
+  if (statuses.some((status) => status === '发货中') || statuses.some((status) => status === '已发货')) {
+    return { status: '发货中' as DeliveryStatus, remark: null };
+  }
+  if (statuses.some((status) => status === '待发货')) return { status: '待发货' as DeliveryStatus, remark: null };
+  return { status: '未发货' as DeliveryStatus, remark: null };
+}
+
+function aggregateDeliveryDateRange(items: Array<{ delivery_date: string | null }>) {
+  const dates = Array.from(new Set(items.map((item) => normalizeText(item.delivery_date)).filter((value): value is string => Boolean(value)))).sort();
+  if (dates.length === 0) return '';
+  if (dates.length === 1) return dates[0];
+  return `${dates[0]} ~ ${dates[dates.length - 1]}`;
+}
+
+function updateProjectDeliverySummary(projectCaseId: string) {
+  const items = db.prepare('SELECT delivery_status, delivery_remark FROM case_item WHERE project_case_id = ?').all(projectCaseId) as Array<{
+    delivery_status: string | null;
+    delivery_remark: string | null;
+  }>;
+  const summary = aggregateDeliveryStatus(items);
+  db.prepare('UPDATE project_case SET delivery_status = ?, delivery_remark = ? WHERE id = ?').run(summary.status, summary.remark, projectCaseId);
+}
+
 function normalizeAssociatedMonth(value: string | null | undefined, fallbackDate?: string | null) {
   const normalized = normalizeText(value);
   if (normalized) {
@@ -923,6 +1024,7 @@ type MatrixProject = {
   total_progress: number;
   delivery_date: string | null;
   delivery_status: string | null;
+  delivery_remark: string | null;
   associated_month: string | null;
   business_owner_name: string | null;
   design_owner_name: string | null;
@@ -937,6 +1039,7 @@ type MatrixItem = {
   status: string;
   delivery_date: string | null;
   delivery_status: string | null;
+  delivery_remark: string | null;
   open_exception_count: number;
 };
 
@@ -987,6 +1090,7 @@ type MatrixCell = {
   aggregateCount?: number;
   progress_started_at?: string | null;
   progress_finished_at?: string | null;
+  deliveryRemark?: string | null;
 };
 
 type MatrixRow = {
@@ -1062,6 +1166,7 @@ function buildMonthMatrixRow(month: string, rows: MatrixRow[]): MatrixRow {
     associated_month: month,
     open_exception_count: exceptionCount,
     cells: {
+      project_item_name: { value: formatAssociatedMonth(month), aggregateCount: itemCount },
       case_name: { value: formatAssociatedMonth(month) },
       case_item_name: { value: `${rows.length} 项目 / ${itemCount} 子项目` },
       open_exception_count: { value: exceptionCount }
@@ -1098,8 +1203,7 @@ function getMatrixTemplateColumns() {
 
 function buildMatrixColumns(templates: MatrixTemplateColumn[]) {
   return [
-    { key: 'case_name', title: '项目', frozen: 'left' },
-    { key: 'case_item_name', title: '子项目', frozen: 'left' },
+    { key: 'project_item_name', title: '项目 / 子项目', frozen: 'left' },
     ...templates.map((column, index) => ({
       key: `${column.task_type}.${column.subtask_template_id}`,
       title: column.subtask_name,
@@ -1127,7 +1231,14 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
     .all(project.id) as MatrixItem[];
   const caseTasks = getMatrixTasks(project.id, null);
   const children = items.map((item) => buildItemMatrixRow(project, item, caseTasks, templates, user));
+  const deliverySummary = aggregateDeliveryStatus(items);
   const cells: Record<string, MatrixCell> = {
+    project_item_name: {
+      value: project.name,
+      status: project.status,
+      ownerName: businessOwnerLabel(project.business_owner_name),
+      aggregateCount: children.length
+    },
     case_name: {
       value: project.name,
       status: project.status,
@@ -1138,8 +1249,8 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
       value: `${children.length} 个子项目`,
       status: project.status
     },
-    delivery_date: { value: project.delivery_date ?? '' },
-    delivery_status: { value: project.delivery_status ?? '' },
+    delivery_date: { value: aggregateDeliveryDateRange(items) },
+    delivery_status: { value: deliverySummary.status ?? '', deliveryRemark: deliverySummary.remark },
     open_exception_count: { value: project.open_exception_count }
   };
 
@@ -1183,10 +1294,14 @@ function buildItemMatrixRow(project: MatrixProject, item: MatrixItem, caseTasks:
   const itemTasks = getMatrixTasks(project.id, item.id);
   const tasks = [...caseTasks, ...itemTasks];
   const cells: Record<string, MatrixCell> = {
+    project_item_name: { value: item.name, status: item.status, aggregateCount: Math.round(item.progress) },
     case_name: { value: '', ownerName: businessOwnerLabel(project.business_owner_name) },
     case_item_name: { value: item.name, status: item.status, aggregateCount: Math.round(item.progress) },
     delivery_date: { value: item.delivery_date ?? '' },
-    delivery_status: { value: item.delivery_status ?? '' },
+    delivery_status: {
+      value: normalizeDeliveryStatus(item.delivery_status) ?? '',
+      deliveryRemark: normalizeDeliveryRemark(normalizeDeliveryStatus(item.delivery_status), item.delivery_remark, item.delivery_status)
+    },
     open_exception_count: { value: item.open_exception_count }
   };
 
@@ -1315,11 +1430,12 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
     throw err;
   }
   const items = db.prepare('SELECT * FROM case_item WHERE project_case_id = ? ORDER BY source_row, id').all(projectCaseId) as Array<{
-    id: string;
-    name: string;
-    progress: number;
-    delivery_date: string | null;
-    delivery_status: string | null;
+      id: string;
+      name: string;
+      progress: number;
+      delivery_date: string | null;
+      delivery_status: string | null;
+      delivery_remark: string | null;
   }>;
   const subtaskTemplates = db
     .prepare(
@@ -1362,7 +1478,10 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
       business_owner_name: { value: projectCase.business_owner_name ?? '' },
       design_owner_name: { value: projectCase.design_owner_name ?? '' },
       delivery_date: { value: item.delivery_date ?? '' },
-      delivery_status: { value: item.delivery_status ?? '' }
+      delivery_status: {
+        value: normalizeDeliveryStatus(item.delivery_status) ?? '',
+        deliveryRemark: normalizeDeliveryRemark(normalizeDeliveryStatus(item.delivery_status), item.delivery_remark, item.delivery_status)
+      }
     };
 
     const openExceptionCount = db

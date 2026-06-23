@@ -20,6 +20,7 @@ export type MatrixCell = {
   aggregateCount?: number;
   progress_started_at?: string | null;
   progress_finished_at?: string | null;
+  deliveryRemark?: string | null;
 };
 
 export type MatrixRow = {
@@ -60,7 +61,8 @@ export type ProjectCase = {
   business_owner_name?: string;
   design_owner_name?: string;
   delivery_date?: string | null;
-  delivery_status?: string;
+  delivery_status?: string | null;
+  delivery_remark?: string | null;
   open_exception_count?: number;
   items?: ProjectCaseItem[];
   stage_owners?: ProjectStageOwner[];
@@ -73,6 +75,7 @@ export type ProjectCaseItem = {
   status?: string;
   delivery_date?: string | null;
   delivery_status?: string | null;
+  delivery_remark?: string | null;
   source_row?: number | null;
 };
 

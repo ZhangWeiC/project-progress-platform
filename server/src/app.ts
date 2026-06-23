@@ -138,7 +138,8 @@ const projectCaseItemBody = z.object({
   id: z.string().nullable().optional(),
   name: z.string().trim().min(1),
   delivery_date: z.string().trim().nullable().optional(),
-  delivery_status: z.string().trim().nullable().optional()
+  delivery_status: z.string().trim().nullable().optional(),
+  delivery_remark: z.string().trim().nullable().optional()
 });
 const projectCaseStageOwnerBody = z.object({
   task_type: z.string().trim().min(1),
@@ -154,6 +155,7 @@ const projectCaseFields = {
   estimated_weight: z.number().nullable().optional(),
   delivery_date: z.string().trim().nullable().optional(),
   delivery_status: z.string().trim().nullable().optional(),
+  delivery_remark: z.string().trim().nullable().optional(),
   associated_month: z.string().trim().nullable().optional(),
   items: z.array(projectCaseItemBody).optional(),
   stage_owners: z.array(projectCaseStageOwnerBody).optional()
@@ -170,7 +172,8 @@ const deliveryInfoBody = z.object({
   project_case_id: z.string().trim().min(1),
   case_item_id: z.string().trim().nullable().optional(),
   delivery_date: z.string().trim().nullable().optional(),
-  delivery_status: z.string().trim().nullable().optional()
+  delivery_status: z.string().trim().nullable().optional(),
+  delivery_remark: z.string().trim().nullable().optional()
 });
 
 app.post('/api/cases', async (request) => {
