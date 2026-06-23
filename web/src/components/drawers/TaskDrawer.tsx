@@ -1,5 +1,6 @@
-import { Alert, Button, Descriptions, Drawer, Empty, Form, InputNumber, List, Progress, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Descriptions, Drawer, Empty, InputNumber, List, Progress, Space, Table, Tag, Typography, message } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import { fetchTaskDetails, updateSubtaskProgress } from '../../services/cases';
 import type { CaseSubTask } from '../../types';
 import { statusColor, statusLabel } from '../../utils/labels';
@@ -50,24 +51,17 @@ export function TaskDrawer({ taskId, open, onClose, matrixCaseId }: Props) {
     },
     {
       title: '更新',
-      width: 190,
+      width: 120,
       render: (_: unknown, row: CaseSubTask) => {
         if (!row.editable) {
           return <Typography.Text type="secondary">只读</Typography.Text>;
         }
         return (
-          <Form
-            layout="inline"
-            initialValues={{ progress: Math.round(row.progress) }}
-            onFinish={(values) => mutation.mutate({ id: row.id, progress: values.progress })}
-          >
-            <Form.Item name="progress" noStyle>
-              <InputNumber min={0} max={100} addonAfter="%" size="small" style={{ width: 96 }} />
-            </Form.Item>
-            <Button size="small" htmlType="submit" loading={mutation.isPending}>
-              保存
-            </Button>
-          </Form>
+          <AutoSaveProgressInput
+            row={row}
+            saving={mutation.isPending && mutation.variables?.id === row.id}
+            onSave={(id, progress) => mutation.mutate({ id, progress })}
+          />
         );
       }
     }
@@ -144,4 +138,48 @@ export function TaskDrawer({ taskId, open, onClose, matrixCaseId }: Props) {
       )}
     </Drawer>
   );
+}
+
+function AutoSaveProgressInput({
+  row,
+  saving,
+  onSave
+}: {
+  row: CaseSubTask;
+  saving: boolean;
+  onSave: (id: string, progress: number) => void;
+}) {
+  const originalProgress = Math.round(row.progress);
+  const [value, setValue] = useState<number | null>(originalProgress);
+
+  useEffect(() => {
+    setValue(originalProgress);
+  }, [row.id, originalProgress]);
+
+  const saveIfChanged = () => {
+    const nextProgress = normalizeProgress(value);
+    setValue(nextProgress);
+    if (nextProgress === originalProgress) return;
+    onSave(row.id, nextProgress);
+  };
+
+  return (
+    <InputNumber
+      min={0}
+      max={100}
+      addonAfter="%"
+      size="small"
+      style={{ width: 96 }}
+      value={value}
+      disabled={saving}
+      onChange={(nextValue) => setValue(typeof nextValue === 'number' ? nextValue : null)}
+      onBlur={saveIfChanged}
+      onPressEnter={(event) => event.currentTarget.blur()}
+    />
+  );
+}
+
+function normalizeProgress(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
 }
