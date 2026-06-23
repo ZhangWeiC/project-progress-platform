@@ -1564,6 +1564,7 @@ function getSchedulableDepartments() {
          FROM department d
          JOIN task_template tt ON tt.default_owner_department_id = d.id
          WHERE d.id != 'dept-business'
+           AND (d.status IS NULL OR d.status != 'deleted')
          GROUP BY d.id, d.name
        )
        ORDER BY first_sort_order, name`

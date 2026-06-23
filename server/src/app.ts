@@ -587,7 +587,7 @@ app.get('/api/me/exceptions', async (request) => {
 app.get('/api/lookups', async () => {
   return {
     employees: db.prepare('SELECT * FROM employee WHERE COALESCE(is_active, 1) = 1 ORDER BY name').all(),
-    departments: db.prepare('SELECT * FROM department ORDER BY name').all(),
+    departments: db.prepare("SELECT * FROM department WHERE status IS NULL OR status != 'deleted' ORDER BY name").all(),
     teams: db.prepare('SELECT * FROM team ORDER BY name').all()
   };
 });

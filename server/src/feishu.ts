@@ -572,7 +572,9 @@ function findDepartment(openDepartmentId?: string | null, departmentId?: string 
     const found = db.prepare('SELECT id FROM department WHERE feishu_department_id = ? OR id = ?').get(departmentId, departmentId) as { id: string } | undefined;
     if (found) return found;
   }
-  if (name) return db.prepare('SELECT id FROM department WHERE name = ?').get(name) as { id: string } | undefined;
+  if (name) {
+    return db.prepare("SELECT id FROM department WHERE name = ? AND (status IS NULL OR status != 'deleted')").get(name) as { id: string } | undefined;
+  }
   return null;
 }
 

@@ -393,6 +393,7 @@ export function initializeDatabase() {
   migrateFeishuIdentityColumns();
   migrateProjectAssociatedMonth();
   seedDatabase();
+  hideLegacyLocalDepartments();
   seedCredentials();
   migrateWorkflowModel();
   seedProductionPlans();
@@ -498,6 +499,16 @@ function addColumnIfMissing(table: string, column: string, definition: string) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   if (columns.some((item) => item.name === column)) return;
   db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+}
+
+function hideLegacyLocalDepartments() {
+  db.prepare(
+    `UPDATE department
+     SET status = 'deleted'
+     WHERE id IN ('dept-delivery', 'dept-material', 'dept-quality')
+       AND feishu_department_id IS NULL
+       AND feishu_open_department_id IS NULL`
+  ).run();
 }
 
 function migrateProjectAssociatedMonth() {
