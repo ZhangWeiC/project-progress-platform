@@ -300,8 +300,7 @@ function FeishuDepartmentTable({
         }}
         columns={[
           { title: '部门', dataIndex: 'name', render: (value) => value || '未命名部门' },
-          { title: '人员数', dataIndex: 'employees', width: 100, render: (employees: FeishuContactEmployee[]) => employees.length },
-          { title: '飞书部门 ID', dataIndex: 'feishu_open_department_id', width: 280, render: (value) => value || '-' }
+          { title: '人员数', dataIndex: 'employees', width: 100, render: (employees: FeishuContactEmployee[]) => employees.length }
         ]}
       />
       {contacts?.unassigned?.length ? (
@@ -337,7 +336,7 @@ function EmployeeTable({
       rowKey="id"
       size="small"
       pagination={false}
-      scroll={{ x: 620 }}
+      scroll={{ x: 360 }}
       locale={{ emptyText }}
       dataSource={rows}
       columns={[
@@ -348,8 +347,6 @@ function EmployeeTable({
           width: 100,
           render: (value) => <Tag color={permissionLevelColor(value ?? 'viewer')}>{permissionLabel(value ?? 'viewer')}</Tag>
         },
-        { title: '主部门', dataIndex: 'is_primary', width: 90, render: (value) => value ? <Tag color="blue">是</Tag> : '-' },
-        { title: '飞书 Open ID', dataIndex: 'feishu_open_id', width: 260, render: (value) => value || '-' },
         {
           title: '操作',
           key: 'actions',
