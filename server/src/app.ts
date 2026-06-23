@@ -27,7 +27,15 @@ import {
 } from './services.js';
 import { confirmExcelImport, createExcelImport, getImportPreview } from './importer.js';
 import { login, logout } from './auth.js';
-import { buildFeishuAuthorizeUrl, getFeishuContactsByDepartment, getFeishuStatus, loginWithFeishuCode, syncFeishuContacts } from './feishu.js';
+import {
+  buildFeishuAuthorizeUrl,
+  deactivateFeishuContactEmployee,
+  getFeishuContactsByDepartment,
+  getFeishuStatus,
+  loginWithFeishuCode,
+  syncFeishuContacts,
+  updateFeishuContactEmployee
+} from './feishu.js';
 
 initializeDatabase();
 
@@ -578,7 +586,7 @@ app.get('/api/me/exceptions', async (request) => {
 
 app.get('/api/lookups', async () => {
   return {
-    employees: db.prepare('SELECT * FROM employee ORDER BY name').all(),
+    employees: db.prepare('SELECT * FROM employee WHERE COALESCE(is_active, 1) = 1 ORDER BY name').all(),
     departments: db.prepare('SELECT * FROM department ORDER BY name').all(),
     teams: db.prepare('SELECT * FROM team ORDER BY name').all()
   };
@@ -607,6 +615,25 @@ app.get('/api/admin/feishu/contacts', async (request) => {
     throw err;
   }
   return getFeishuContactsByDepartment();
+});
+
+const feishuEmployeeUpdateBody = z.object({
+  name: z.string().trim().min(1),
+  role: z.string().trim().min(1),
+  permission_level: z.enum(['manager', 'editor', 'viewer'])
+});
+
+app.patch('/api/admin/feishu/employees/:id', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id } = z.object({ id: z.string().trim().min(1) }).parse(request.params);
+  const body = feishuEmployeeUpdateBody.parse(request.body);
+  return updateFeishuContactEmployee(id, body, user);
+});
+
+app.delete('/api/admin/feishu/employees/:id', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id } = z.object({ id: z.string().trim().min(1) }).parse(request.params);
+  return deactivateFeishuContactEmployee(id, user);
 });
 
 app.get('/api/views', async () => {

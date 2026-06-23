@@ -57,6 +57,8 @@ export function initializeDatabase() {
       mobile TEXT,
       avatar_url TEXT,
       is_active INTEGER NOT NULL DEFAULT 1,
+      name_overridden INTEGER NOT NULL DEFAULT 0,
+      locally_disabled INTEGER NOT NULL DEFAULT 0,
       last_feishu_sync_at TEXT,
       FOREIGN KEY (department_id) REFERENCES department(id)
     );
@@ -480,6 +482,8 @@ function migrateFeishuIdentityColumns() {
   addColumnIfMissing('employee', 'mobile', 'TEXT');
   addColumnIfMissing('employee', 'avatar_url', 'TEXT');
   addColumnIfMissing('employee', 'is_active', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnIfMissing('employee', 'name_overridden', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('employee', 'locally_disabled', 'INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing('employee', 'last_feishu_sync_at', 'TEXT');
 
   db.exec(`

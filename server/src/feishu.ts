@@ -8,6 +8,8 @@ const FEISHU_AUTHORIZE_URL = process.env.FEISHU_AUTHORIZE_URL ?? 'https://accoun
 const FEISHU_DEFAULT_ROLE = process.env.FEISHU_DEFAULT_ROLE ?? 'worker';
 const FEISHU_ROOT_DEPARTMENT_ID = process.env.FEISHU_ROOT_DEPARTMENT_ID ?? '0';
 const FEISHU_OAUTH_SCOPE = process.env.FEISHU_OAUTH_SCOPE ?? 'auth:user.id:read user_profile';
+const EDITABLE_ROLES = new Set(['admin', 'business_owner', 'design_owner', 'material_owner', 'quality_owner', 'team_leader', 'worker']);
+const PERMISSION_LEVELS = new Set(['manager', 'editor', 'viewer']);
 
 let tenantTokenCache: { token: string; expiresAt: number } | null = null;
 
@@ -67,6 +69,9 @@ type LocalEmployee = {
   role: string;
   permission_level: string;
   department_id: string | null;
+  is_active: number;
+  name_overridden: number;
+  locally_disabled: number;
 };
 
 type FeishuOAuthUser = {
@@ -99,9 +104,12 @@ type ContactEmployeeRow = {
   id: string;
   name: string;
   role: string;
+  permission_level: string;
   department_id: string | null;
   feishu_open_id: string | null;
   is_active: number;
+  name_overridden: number;
+  locally_disabled: number;
   group_department_id: string | null;
   is_primary: number | null;
 };
@@ -109,7 +117,12 @@ type ContactEmployeeRow = {
 export function getFeishuStatus() {
   const configured = Boolean(process.env.FEISHU_APP_ID && process.env.FEISHU_APP_SECRET && process.env.FEISHU_REDIRECT_URI);
   const lastSyncedAt = db.prepare('SELECT MAX(last_feishu_sync_at) as value FROM employee').get() as { value: string | null };
-  const linkedEmployees = db.prepare('SELECT COUNT(*) as count FROM employee WHERE feishu_open_id IS NOT NULL OR feishu_union_id IS NOT NULL OR feishu_user_id IS NOT NULL').get() as { count: number };
+  const linkedEmployees = db.prepare(
+    `SELECT COUNT(*) as count
+     FROM employee
+     WHERE COALESCE(is_active, 1) = 1
+       AND (feishu_open_id IS NOT NULL OR feishu_union_id IS NOT NULL OR feishu_user_id IS NOT NULL)`
+  ).get() as { count: number };
   const linkedDepartments = db.prepare('SELECT COUNT(*) as count FROM department WHERE feishu_open_department_id IS NOT NULL OR feishu_department_id IS NOT NULL').get() as { count: number };
   return {
     configured,
@@ -124,16 +137,18 @@ export function getFeishuStatus() {
 export function getFeishuContactsByDepartment() {
   const departments = db.prepare(
     `SELECT d.id, d.name, d.parent_department_id, d.feishu_open_department_id, d.status,
-            COUNT(ed.employee_id) as employee_count
+            COUNT(e.id) as employee_count
      FROM department d
      LEFT JOIN employee_department ed ON ed.department_id = d.id
+     LEFT JOIN employee e ON e.id = ed.employee_id AND COALESCE(e.is_active, 1) = 1
      WHERE d.status IS NULL OR d.status != 'deleted'
      GROUP BY d.id
      ORDER BY COALESCE(d.parent_department_id, ''), d.name`
   ).all() as Array<Omit<ContactDepartmentRow, 'employees' | 'children'>>;
 
   const employees = db.prepare(
-    `SELECT e.id, e.name, e.role, e.department_id, e.feishu_open_id, e.is_active,
+    `SELECT e.id, e.name, e.role, e.permission_level, e.department_id, e.feishu_open_id, e.is_active,
+            e.name_overridden, e.locally_disabled,
             ed.department_id as group_department_id, ed.is_primary
      FROM employee e
      LEFT JOIN employee_department ed ON ed.employee_id = e.id
@@ -182,7 +197,7 @@ export async function loginWithFeishuCode(code: string, state: string) {
   const userInfo = await fetchFeishuUserInfo(tokenInfo.access_token).catch(() => tokenInfo.user);
   const employee = upsertEmployeeFromFeishu(userInfo);
   if (!employee) {
-    const err = new Error('无法识别飞书用户信息');
+    const err = new Error('该飞书用户未启用或已在平台通讯录中停用');
     err.name = 'AUTH_INVALID';
     throw err;
   }
@@ -242,7 +257,10 @@ export async function syncFeishuContacts(currentUser: CurrentUser): Promise<Sync
 
   if (seenEmployeeIds.size > 0) {
     const linkedEmployees = db.prepare(
-      'SELECT id FROM employee WHERE feishu_open_id IS NOT NULL OR feishu_union_id IS NOT NULL OR feishu_user_id IS NOT NULL'
+      `SELECT id
+       FROM employee
+       WHERE COALESCE(is_active, 1) = 1
+         AND (feishu_open_id IS NOT NULL OR feishu_union_id IS NOT NULL OR feishu_user_id IS NOT NULL)`
     ).all() as Array<{ id: string }>;
     const deactivate = db.prepare('UPDATE employee SET is_active = 0, last_feishu_sync_at = ? WHERE id = ?');
     for (const employee of linkedEmployees) {
@@ -256,6 +274,52 @@ export async function syncFeishuContacts(currentUser: CurrentUser): Promise<Sync
   return stats;
 }
 
+export function updateFeishuContactEmployee(
+  employeeId: string,
+  input: { name: string; role: string; permission_level: string },
+  currentUser: CurrentUser
+) {
+  assertFeishuAdmin(currentUser, '仅管理员可编辑飞书通讯录');
+  const name = input.name.trim();
+  const role = input.role.trim();
+  const permissionLevel = input.permission_level.trim();
+  if (!name) throwValidation('请输入人员姓名');
+  if (!EDITABLE_ROLES.has(role)) throwValidation('请选择有效的人员角色');
+  if (!PERMISSION_LEVELS.has(permissionLevel)) throwValidation('请选择有效的权限层级');
+
+  const existing = db.prepare('SELECT id FROM employee WHERE id = ? AND COALESCE(is_active, 1) = 1').get(employeeId) as { id: string } | undefined;
+  if (!existing) throwNotFound('人员不存在或已停用');
+
+  db.prepare(
+    `UPDATE employee
+     SET name = ?, role = ?, permission_level = ?, name_overridden = 1
+     WHERE id = ?`
+  ).run(name, role, permissionLevel, employeeId);
+
+  return db.prepare(
+    `SELECT id, name, role, permission_level, department_id, feishu_open_id, is_active, name_overridden, locally_disabled
+     FROM employee
+     WHERE id = ?`
+  ).get(employeeId);
+}
+
+export function deactivateFeishuContactEmployee(employeeId: string, currentUser: CurrentUser) {
+  assertFeishuAdmin(currentUser, '仅管理员可删除飞书通讯录人员');
+  if (employeeId === currentUser.id) throwValidation('不能删除当前登录用户');
+
+  const existing = db.prepare('SELECT id FROM employee WHERE id = ? AND COALESCE(is_active, 1) = 1').get(employeeId) as { id: string } | undefined;
+  if (!existing) throwNotFound('人员不存在或已停用');
+
+  const disabledAt = nowIso();
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE employee SET is_active = 0, locally_disabled = 1, last_feishu_sync_at = COALESCE(last_feishu_sync_at, ?) WHERE id = ?').run(disabledAt, employeeId);
+    db.prepare('UPDATE user_credential SET enabled = 0 WHERE employee_id = ?').run(employeeId);
+    db.prepare('DELETE FROM auth_session WHERE employee_id = ?').run(employeeId);
+  });
+  tx();
+  return { ok: true };
+}
+
 function requireFeishuConfig() {
   const appId = process.env.FEISHU_APP_ID?.trim();
   const appSecret = process.env.FEISHU_APP_SECRET?.trim();
@@ -266,6 +330,25 @@ function requireFeishuConfig() {
     throw err;
   }
   return { appId, appSecret, redirectUri };
+}
+
+function assertFeishuAdmin(user: CurrentUser, message: string) {
+  if (user.role === 'admin') return;
+  const err = new Error(message);
+  err.name = 'PERMISSION_DENIED';
+  throw err;
+}
+
+function throwValidation(message: string): never {
+  const err = new Error(message);
+  err.name = 'VALIDATION_ERROR';
+  throw err;
+}
+
+function throwNotFound(message: string): never {
+  const err = new Error(message);
+  err.name = 'NOT_FOUND';
+  throw err;
 }
 
 async function getTenantAccessToken() {
@@ -398,7 +481,13 @@ function upsertEmployeeFromFeishu(user: FeishuOAuthUser | undefined): LocalEmplo
   const employee = normalizeFeishuEmployee(user);
   const existing = findEmployee(employee);
   const saved = saveFeishuEmployee(employee, existing, existing?.department_id ?? undefined, 1, nowIso());
-  return db.prepare('SELECT id, name, role, permission_level, department_id FROM employee WHERE id = ?').get(saved.id) as LocalEmployee | null;
+  const row = db.prepare(
+    `SELECT id, name, role, permission_level, department_id, is_active, name_overridden, locally_disabled
+     FROM employee
+     WHERE id = ?`
+  ).get(saved.id) as LocalEmployee | null;
+  if (!row || Number(row.is_active) !== 1) return null;
+  return row;
 }
 
 function saveFeishuEmployee(
@@ -412,6 +501,8 @@ function saveFeishuEmployee(
   const role = existing?.role ?? FEISHU_DEFAULT_ROLE;
   const permissionLevel = existing?.permission_level ?? 'viewer';
   const targetDepartmentId = departmentId ?? existing?.department_id ?? null;
+  const displayName = Number(existing?.name_overridden ?? 0) === 1 ? existing?.name ?? employee.name : employee.name;
+  const nextActive = Number(existing?.locally_disabled ?? 0) === 1 ? 0 : active;
 
   if (existing) {
     db.prepare(
@@ -419,7 +510,7 @@ function saveFeishuEmployee(
        SET name = ?, department_id = ?, role = ?, permission_level = ?, feishu_open_id = ?, feishu_union_id = ?, feishu_user_id = ?, email = ?, mobile = ?, avatar_url = ?, is_active = ?, last_feishu_sync_at = ?
        WHERE id = ?`
     ).run(
-      employee.name,
+      displayName,
       targetDepartmentId,
       role,
       permissionLevel,
@@ -429,7 +520,7 @@ function saveFeishuEmployee(
       employee.email,
       employee.mobile,
       employee.avatarUrl,
-      active,
+      nextActive,
       syncedAt,
       existing.id
     );
@@ -494,10 +585,18 @@ function findEmployee(employee: ReturnType<typeof normalizeFeishuEmployee>): Loc
   ];
   for (const [column, value] of queries) {
     if (!value) continue;
-    const found = db.prepare(`SELECT id, name, role, permission_level, department_id FROM employee WHERE ${column} = ?`).get(value) as LocalEmployee | undefined;
+    const found = db.prepare(
+      `SELECT id, name, role, permission_level, department_id, is_active, name_overridden, locally_disabled
+       FROM employee
+       WHERE ${column} = ?`
+    ).get(value) as LocalEmployee | undefined;
     if (found) return found;
   }
-  return (db.prepare('SELECT id, name, role, permission_level, department_id FROM employee WHERE name = ?').get(employee.name) as LocalEmployee | undefined) ?? null;
+  return (db.prepare(
+    `SELECT id, name, role, permission_level, department_id, is_active, name_overridden, locally_disabled
+     FROM employee
+     WHERE name = ?`
+  ).get(employee.name) as LocalEmployee | undefined) ?? null;
 }
 
 function feishuDepartmentKey(department: FeishuDepartment) {

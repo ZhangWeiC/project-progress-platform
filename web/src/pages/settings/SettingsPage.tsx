@@ -1,14 +1,18 @@
-import { Alert, Button, Card, Descriptions, Space, Table, Tabs, Tag, Typography, message } from 'antd';
+import { DeleteOutlined, EditOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Descriptions, Form, Input, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { fetchWorkflowTemplate } from '../../services/cases';
-import { apiGet, apiPost } from '../../services/api';
+import { apiDelete, apiGet, apiPatch, apiPost } from '../../services/api';
 import type { WorkflowStage } from '../../types';
 
 export function SettingsPage() {
   const { section = 'templates' } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [employeeForm] = Form.useForm<FeishuEmployeeFormValues>();
+  const [editingEmployee, setEditingEmployee] = useState<FeishuContactEmployee | null>(null);
   const workflowQuery = useQuery({
     queryKey: ['workflow-template'],
     queryFn: fetchWorkflowTemplate
@@ -31,43 +35,113 @@ export function SettingsPage() {
     },
     onError: (error) => message.error(error.message)
   });
+  const feishuEmployeeUpdateMutation = useMutation({
+    mutationFn: ({ id, values }: { id: string; values: FeishuEmployeeFormValues }) => apiPatch<FeishuContactEmployee>(`/api/admin/feishu/employees/${id}`, values),
+    onSuccess: () => {
+      message.success('通讯录人员已更新');
+      refreshFeishuContacts();
+      setEditingEmployee(null);
+      employeeForm.resetFields();
+    },
+    onError: (error) => message.error(error.message)
+  });
+  const feishuEmployeeDeleteMutation = useMutation({
+    mutationFn: (employeeId: string) => apiDelete<{ ok: boolean }>(`/api/admin/feishu/employees/${employeeId}`),
+    onSuccess: () => {
+      message.success('通讯录人员已删除');
+      refreshFeishuContacts();
+    },
+    onError: (error) => message.error(error.message)
+  });
+
+  function refreshFeishuContacts() {
+    queryClient.invalidateQueries({ queryKey: ['feishu-status'] });
+    queryClient.invalidateQueries({ queryKey: ['feishu-contacts'] });
+    queryClient.invalidateQueries({ queryKey: ['lookups'] });
+  }
+
+  function openEmployeeEditor(employee: FeishuContactEmployee) {
+    setEditingEmployee(employee);
+    employeeForm.setFieldsValue({
+      name: employee.name,
+      role: employee.role,
+      permission_level: normalizePermissionLevel(employee.permission_level)
+    });
+  }
+
+  function closeEmployeeEditor() {
+    setEditingEmployee(null);
+    employeeForm.resetFields();
+  }
+
+  function submitEmployeeForm(values: FeishuEmployeeFormValues) {
+    if (!editingEmployee) return;
+    feishuEmployeeUpdateMutation.mutate({ id: editingEmployee.id, values });
+  }
 
   return (
-    <Card>
-      <Typography.Title level={4}>后台配置</Typography.Title>
-      <Tabs
-        activeKey={section}
-        onChange={(key) => navigate(`/settings/${key}`)}
-        items={[
-          {
-            key: 'templates',
-            label: '模板配置',
-            children: workflowQuery.error ? (
-              <Alert type="error" message={workflowQuery.error.message} />
-            ) : (
-              <WorkflowTemplateTable rows={workflowQuery.data?.stages ?? []} loading={workflowQuery.isLoading} />
-            )
-          },
-          {
-            key: 'feishu',
-            label: '飞书通讯录',
-            children: (
-              <FeishuSyncPanel
-                status={feishuStatusQuery.data}
-                loading={feishuStatusQuery.isLoading}
-                error={feishuStatusQuery.error}
-                syncing={feishuSyncMutation.isPending}
-                contacts={feishuContactsQuery.data}
-                contactsLoading={feishuContactsQuery.isLoading}
-                contactsError={feishuContactsQuery.error}
-                onSync={() => feishuSyncMutation.mutate()}
-              />
-            )
-          },
-          { key: 'permissions', label: '权限配置', children: <PermissionTable /> }
-        ]}
-      />
-    </Card>
+    <>
+      <Card>
+        <Typography.Title level={4}>后台配置</Typography.Title>
+        <Tabs
+          activeKey={section}
+          onChange={(key) => navigate(`/settings/${key}`)}
+          items={[
+            {
+              key: 'templates',
+              label: '模板配置',
+              children: workflowQuery.error ? (
+                <Alert type="error" message={workflowQuery.error.message} />
+              ) : (
+                <WorkflowTemplateTable rows={workflowQuery.data?.stages ?? []} loading={workflowQuery.isLoading} />
+              )
+            },
+            {
+              key: 'feishu',
+              label: '飞书通讯录',
+              children: (
+                <FeishuSyncPanel
+                  status={feishuStatusQuery.data}
+                  loading={feishuStatusQuery.isLoading}
+                  error={feishuStatusQuery.error}
+                  syncing={feishuSyncMutation.isPending}
+                  contacts={feishuContactsQuery.data}
+                  contactsLoading={feishuContactsQuery.isLoading}
+                  contactsError={feishuContactsQuery.error}
+                  deletingEmployeeId={feishuEmployeeDeleteMutation.variables}
+                  onSync={() => feishuSyncMutation.mutate()}
+                  onEditEmployee={openEmployeeEditor}
+                  onDeleteEmployee={(employeeId) => feishuEmployeeDeleteMutation.mutate(employeeId)}
+                />
+              )
+            },
+            { key: 'permissions', label: '权限配置', children: <PermissionTable /> }
+          ]}
+        />
+      </Card>
+      <Modal
+        title="编辑通讯录人员"
+        open={Boolean(editingEmployee)}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={feishuEmployeeUpdateMutation.isPending}
+        onCancel={closeEmployeeEditor}
+        onOk={() => employeeForm.submit()}
+        destroyOnClose
+      >
+        <Form<FeishuEmployeeFormValues> form={employeeForm} layout="vertical" onFinish={submitEmployeeForm}>
+          <Form.Item label="姓名" name="name" rules={[{ required: true, message: '请输入姓名' }]}>
+            <Input placeholder="请输入姓名" />
+          </Form.Item>
+          <Form.Item label="角色" name="role" rules={[{ required: true, message: '请选择角色' }]}>
+            <Select options={roleOptions} />
+          </Form.Item>
+          <Form.Item label="权限层级" name="permission_level" rules={[{ required: true, message: '请选择权限层级' }]}>
+            <Select options={permissionOptions} />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </>
   );
 }
 
@@ -95,9 +169,18 @@ type FeishuContactEmployee = {
   id: string;
   name: string;
   role: string;
+  permission_level?: PermissionLevel | null;
   feishu_open_id?: string | null;
   group_department_id?: string | null;
   is_primary?: number | null;
+};
+
+type PermissionLevel = 'manager' | 'editor' | 'viewer';
+
+type FeishuEmployeeFormValues = {
+  name: string;
+  role: string;
+  permission_level: PermissionLevel;
 };
 
 type FeishuContactDepartment = {
@@ -116,6 +199,22 @@ type FeishuContactsResponse = {
   unassigned: FeishuContactEmployee[];
 };
 
+const roleOptions = [
+  { value: 'admin', label: '管理员' },
+  { value: 'business_owner', label: '业务部负责人' },
+  { value: 'design_owner', label: '设计部负责人' },
+  { value: 'material_owner', label: '材料仓储' },
+  { value: 'quality_owner', label: '质检负责人' },
+  { value: 'team_leader', label: '班组长' },
+  { value: 'worker', label: '普通员工' }
+];
+
+const permissionOptions = [
+  { value: 'manager', label: '可管理' },
+  { value: 'editor', label: '可编辑' },
+  { value: 'viewer', label: '可查看' }
+];
+
 function FeishuSyncPanel({
   status,
   loading,
@@ -124,7 +223,10 @@ function FeishuSyncPanel({
   contacts,
   contactsLoading,
   contactsError,
-  onSync
+  deletingEmployeeId,
+  onSync,
+  onEditEmployee,
+  onDeleteEmployee
 }: {
   status?: FeishuStatus;
   loading: boolean;
@@ -133,7 +235,10 @@ function FeishuSyncPanel({
   contacts?: FeishuContactsResponse;
   contactsLoading: boolean;
   contactsError: Error | null;
+  deletingEmployeeId?: string;
   onSync: () => void;
+  onEditEmployee: (employee: FeishuContactEmployee) => void;
+  onDeleteEmployee: (employeeId: string) => void;
 }) {
   if (error) return <Alert type="error" message={error.message} />;
   if (loading) return <Typography.Text type="secondary">正在读取飞书配置...</Typography.Text>;
@@ -160,12 +265,33 @@ function FeishuSyncPanel({
       <Button type="primary" loading={syncing} disabled={!status?.configured} onClick={onSync}>
         同步飞书通讯录
       </Button>
-      <FeishuDepartmentTable contacts={contacts} loading={contactsLoading} error={contactsError} />
+      <FeishuDepartmentTable
+        contacts={contacts}
+        loading={contactsLoading}
+        error={contactsError}
+        deletingEmployeeId={deletingEmployeeId}
+        onEditEmployee={onEditEmployee}
+        onDeleteEmployee={onDeleteEmployee}
+      />
     </Space>
   );
 }
 
-function FeishuDepartmentTable({ contacts, loading, error }: { contacts?: FeishuContactsResponse; loading: boolean; error: Error | null }) {
+function FeishuDepartmentTable({
+  contacts,
+  loading,
+  error,
+  deletingEmployeeId,
+  onEditEmployee,
+  onDeleteEmployee
+}: {
+  contacts?: FeishuContactsResponse;
+  loading: boolean;
+  error: Error | null;
+  deletingEmployeeId?: string;
+  onEditEmployee: (employee: FeishuContactEmployee) => void;
+  onDeleteEmployee: (employeeId: string) => void;
+}) {
   if (error) return <Alert type="error" message={error.message} />;
   return (
     <Space direction="vertical" size="small" style={{ width: '100%' }}>
@@ -178,7 +304,13 @@ function FeishuDepartmentTable({ contacts, loading, error }: { contacts?: Feishu
         dataSource={contacts?.departments ?? []}
         expandable={{
           expandedRowRender: (department) => (
-            <EmployeeTable rows={department.employees} emptyText="该部门暂无人员" />
+            <EmployeeTable
+              rows={department.employees}
+              emptyText="该部门暂无人员"
+              deletingEmployeeId={deletingEmployeeId}
+              onEdit={onEditEmployee}
+              onDelete={onDeleteEmployee}
+            />
           ),
           rowExpandable: (department) => department.employees.length > 0 || Boolean(department.children?.length)
         }}
@@ -190,29 +322,93 @@ function FeishuDepartmentTable({ contacts, loading, error }: { contacts?: Feishu
       />
       {contacts?.unassigned?.length ? (
         <Card size="small" title="未分配部门">
-          <EmployeeTable rows={contacts.unassigned} emptyText="暂无未分配人员" />
+          <EmployeeTable
+            rows={contacts.unassigned}
+            emptyText="暂无未分配人员"
+            deletingEmployeeId={deletingEmployeeId}
+            onEdit={onEditEmployee}
+            onDelete={onDeleteEmployee}
+          />
         </Card>
       ) : null}
     </Space>
   );
 }
 
-function EmployeeTable({ rows, emptyText }: { rows: FeishuContactEmployee[]; emptyText: string }) {
+function EmployeeTable({
+  rows,
+  emptyText,
+  deletingEmployeeId,
+  onEdit,
+  onDelete
+}: {
+  rows: FeishuContactEmployee[];
+  emptyText: string;
+  deletingEmployeeId?: string;
+  onEdit: (employee: FeishuContactEmployee) => void;
+  onDelete: (employeeId: string) => void;
+}) {
   return (
     <Table<FeishuContactEmployee>
       rowKey="id"
       size="small"
       pagination={false}
+      scroll={{ x: 760 }}
       locale={{ emptyText }}
       dataSource={rows}
       columns={[
         { title: '姓名', dataIndex: 'name' },
-        { title: '角色', dataIndex: 'role', width: 140 },
+        { title: '角色', dataIndex: 'role', width: 140, render: (value) => roleLabel(value) },
+        {
+          title: '权限',
+          dataIndex: 'permission_level',
+          width: 100,
+          render: (value) => <Tag color={permissionLevelColor(value ?? 'viewer')}>{permissionLabel(value ?? 'viewer')}</Tag>
+        },
         { title: '主部门', dataIndex: 'is_primary', width: 90, render: (value) => value ? <Tag color="blue">是</Tag> : '-' },
-        { title: '飞书 Open ID', dataIndex: 'feishu_open_id', width: 260, render: (value) => value || '-' }
+        { title: '飞书 Open ID', dataIndex: 'feishu_open_id', width: 260, render: (value) => value || '-' },
+        {
+          title: '操作',
+          key: 'actions',
+          width: 96,
+          fixed: 'right',
+          align: 'right',
+          render: (_value, row) => (
+            <Space size={2}>
+              <Tooltip title="编辑人员">
+                <Button type="text" size="small" aria-label="编辑人员" icon={<EditOutlined />} onClick={() => onEdit(row)} />
+              </Tooltip>
+              <Tooltip title="删除人员">
+                <Popconfirm
+                  title="删除通讯录人员"
+                  description="会从平台通讯录和负责人选择中移除，历史记录保留。确认删除？"
+                  okText="删除"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
+                  onConfirm={() => onDelete(row.id)}
+                >
+                  <Button type="text" danger size="small" aria-label="删除人员" icon={<DeleteOutlined />} loading={deletingEmployeeId === row.id} />
+                </Popconfirm>
+              </Tooltip>
+            </Space>
+          )
+        }
       ]}
     />
   );
+}
+
+function roleLabel(role: string) {
+  return roleOptions.find((option) => option.value === role)?.label ?? role;
+}
+
+function permissionLabel(level: string) {
+  return permissionOptions.find((option) => option.value === level)?.label ?? level;
+}
+
+function normalizePermissionLevel(level?: string | null): PermissionLevel {
+  if (level === 'manager' || level === 'editor' || level === 'viewer') return level;
+  return 'viewer';
 }
 
 function WorkflowTemplateTable({ rows, loading }: { rows: WorkflowStage[]; loading: boolean }) {
