@@ -8,7 +8,6 @@ const FEISHU_AUTHORIZE_URL = process.env.FEISHU_AUTHORIZE_URL ?? 'https://accoun
 const FEISHU_DEFAULT_ROLE = process.env.FEISHU_DEFAULT_ROLE ?? 'worker';
 const FEISHU_ROOT_DEPARTMENT_ID = process.env.FEISHU_ROOT_DEPARTMENT_ID ?? '0';
 const FEISHU_OAUTH_SCOPE = process.env.FEISHU_OAUTH_SCOPE ?? 'auth:user.id:read user_profile';
-const EDITABLE_ROLES = new Set(['admin', 'business_owner', 'design_owner', 'material_owner', 'quality_owner', 'team_leader', 'worker']);
 const PERMISSION_LEVELS = new Set(['manager', 'editor', 'viewer']);
 
 let tenantTokenCache: { token: string; expiresAt: number } | null = null;
@@ -208,8 +207,8 @@ export async function loginWithFeishuCode(code: string, state: string) {
 }
 
 export async function syncFeishuContacts(currentUser: CurrentUser): Promise<SyncStats> {
-  if (currentUser.role !== 'admin') {
-    const err = new Error('仅管理员可同步飞书通讯录');
+  if (!canManageFeishuContacts(currentUser)) {
+    const err = new Error('仅可管理权限可同步飞书通讯录');
     err.name = 'PERMISSION_DENIED';
     throw err;
   }
@@ -276,15 +275,13 @@ export async function syncFeishuContacts(currentUser: CurrentUser): Promise<Sync
 
 export function updateFeishuContactEmployee(
   employeeId: string,
-  input: { name: string; role: string; permission_level: string },
+  input: { name: string; permission_level: string },
   currentUser: CurrentUser
 ) {
-  assertFeishuAdmin(currentUser, '仅管理员可编辑飞书通讯录');
+  assertCanManageFeishuContacts(currentUser, '仅可管理权限可编辑飞书通讯录');
   const name = input.name.trim();
-  const role = input.role.trim();
   const permissionLevel = input.permission_level.trim();
   if (!name) throwValidation('请输入人员姓名');
-  if (!EDITABLE_ROLES.has(role)) throwValidation('请选择有效的人员角色');
   if (!PERMISSION_LEVELS.has(permissionLevel)) throwValidation('请选择有效的权限层级');
 
   const existing = db.prepare('SELECT id FROM employee WHERE id = ? AND COALESCE(is_active, 1) = 1').get(employeeId) as { id: string } | undefined;
@@ -292,9 +289,9 @@ export function updateFeishuContactEmployee(
 
   db.prepare(
     `UPDATE employee
-     SET name = ?, role = ?, permission_level = ?, name_overridden = 1
+     SET name = ?, permission_level = ?, name_overridden = 1
      WHERE id = ?`
-  ).run(name, role, permissionLevel, employeeId);
+  ).run(name, permissionLevel, employeeId);
 
   return db.prepare(
     `SELECT id, name, role, permission_level, department_id, feishu_open_id, is_active, name_overridden, locally_disabled
@@ -304,7 +301,7 @@ export function updateFeishuContactEmployee(
 }
 
 export function deactivateFeishuContactEmployee(employeeId: string, currentUser: CurrentUser) {
-  assertFeishuAdmin(currentUser, '仅管理员可删除飞书通讯录人员');
+  assertCanManageFeishuContacts(currentUser, '仅可管理权限可删除飞书通讯录人员');
   if (employeeId === currentUser.id) throwValidation('不能删除当前登录用户');
 
   const existing = db.prepare('SELECT id FROM employee WHERE id = ? AND COALESCE(is_active, 1) = 1').get(employeeId) as { id: string } | undefined;
@@ -332,8 +329,12 @@ function requireFeishuConfig() {
   return { appId, appSecret, redirectUri };
 }
 
-function assertFeishuAdmin(user: CurrentUser, message: string) {
-  if (user.role === 'admin') return;
+function canManageFeishuContacts(user: CurrentUser) {
+  return user.role === 'admin' || user.permission_level === 'manager';
+}
+
+function assertCanManageFeishuContacts(user: CurrentUser, message: string) {
+  if (canManageFeishuContacts(user)) return;
   const err = new Error(message);
   err.name = 'PERMISSION_DENIED';
   throw err;

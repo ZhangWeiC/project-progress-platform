@@ -594,8 +594,8 @@ app.get('/api/lookups', async () => {
 
 app.get('/api/admin/feishu/status', async (request) => {
   const user = getCurrentUser(request.headers);
-  if (user.role !== 'admin') {
-    const err = new Error('仅管理员可查看飞书同步状态');
+  if (!canManageProjects(user)) {
+    const err = new Error('仅可管理权限可查看飞书同步状态');
     err.name = 'PERMISSION_DENIED';
     throw err;
   }
@@ -609,8 +609,8 @@ app.post('/api/admin/feishu/sync-contacts', async (request) => {
 
 app.get('/api/admin/feishu/contacts', async (request) => {
   const user = getCurrentUser(request.headers);
-  if (user.role !== 'admin') {
-    const err = new Error('仅管理员可查看飞书通讯录');
+  if (!canManageProjects(user)) {
+    const err = new Error('仅可管理权限可查看飞书通讯录');
     err.name = 'PERMISSION_DENIED';
     throw err;
   }
@@ -619,7 +619,6 @@ app.get('/api/admin/feishu/contacts', async (request) => {
 
 const feishuEmployeeUpdateBody = z.object({
   name: z.string().trim().min(1),
-  role: z.string().trim().min(1),
   permission_level: z.enum(['manager', 'editor', 'viewer'])
 });
 

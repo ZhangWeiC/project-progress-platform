@@ -64,7 +64,6 @@ export function SettingsPage() {
     setEditingEmployee(employee);
     employeeForm.setFieldsValue({
       name: employee.name,
-      role: employee.role,
       permission_level: normalizePermissionLevel(employee.permission_level)
     });
   }
@@ -133,9 +132,6 @@ export function SettingsPage() {
           <Form.Item label="姓名" name="name" rules={[{ required: true, message: '请输入姓名' }]}>
             <Input placeholder="请输入姓名" />
           </Form.Item>
-          <Form.Item label="角色" name="role" rules={[{ required: true, message: '请选择角色' }]}>
-            <Select options={roleOptions} />
-          </Form.Item>
           <Form.Item label="权限层级" name="permission_level" rules={[{ required: true, message: '请选择权限层级' }]}>
             <Select options={permissionOptions} />
           </Form.Item>
@@ -168,7 +164,6 @@ type FeishuSyncStats = {
 type FeishuContactEmployee = {
   id: string;
   name: string;
-  role: string;
   permission_level?: PermissionLevel | null;
   feishu_open_id?: string | null;
   group_department_id?: string | null;
@@ -179,7 +174,6 @@ type PermissionLevel = 'manager' | 'editor' | 'viewer';
 
 type FeishuEmployeeFormValues = {
   name: string;
-  role: string;
   permission_level: PermissionLevel;
 };
 
@@ -198,16 +192,6 @@ type FeishuContactsResponse = {
   flat_departments?: FeishuContactDepartment[];
   unassigned: FeishuContactEmployee[];
 };
-
-const roleOptions = [
-  { value: 'admin', label: '管理员' },
-  { value: 'business_owner', label: '业务部负责人' },
-  { value: 'design_owner', label: '设计部负责人' },
-  { value: 'material_owner', label: '材料仓储' },
-  { value: 'quality_owner', label: '质检负责人' },
-  { value: 'team_leader', label: '班组长' },
-  { value: 'worker', label: '普通员工' }
-];
 
 const permissionOptions = [
   { value: 'manager', label: '可管理' },
@@ -353,12 +337,11 @@ function EmployeeTable({
       rowKey="id"
       size="small"
       pagination={false}
-      scroll={{ x: 760 }}
+      scroll={{ x: 620 }}
       locale={{ emptyText }}
       dataSource={rows}
       columns={[
         { title: '姓名', dataIndex: 'name' },
-        { title: '角色', dataIndex: 'role', width: 140, render: (value) => roleLabel(value) },
         {
           title: '权限',
           dataIndex: 'permission_level',
@@ -396,10 +379,6 @@ function EmployeeTable({
       ]}
     />
   );
-}
-
-function roleLabel(role: string) {
-  return roleOptions.find((option) => option.value === role)?.label ?? role;
 }
 
 function permissionLabel(level: string) {
@@ -448,7 +427,7 @@ function WorkflowTemplateTable({ rows, loading }: { rows: WorkflowStage[]; loadi
 
 type PermissionRow = {
   key: string;
-  role: string;
+  name: string;
   level: string;
   scope: string;
   permissions: string[];
@@ -462,7 +441,7 @@ function PermissionTable() {
       pagination={false}
       dataSource={permissionRows}
       columns={[
-        { title: '角色', dataIndex: 'role', width: 120, render: (value) => <Typography.Text strong>{value}</Typography.Text> },
+        { title: '权限名称', dataIndex: 'name', width: 120, render: (value) => <Typography.Text strong>{value}</Typography.Text> },
         { title: '权限层级', dataIndex: 'level', width: 120, render: (value) => <Tag color={permissionLevelColor(value)}>{value}</Tag> },
         { title: '可见范围', dataIndex: 'scope', width: 220 },
         {
@@ -482,21 +461,21 @@ function PermissionTable() {
 const permissionRows: PermissionRow[] = [
   {
     key: 'manager',
-    role: '可管理',
+    name: '可管理',
     level: 'manager',
     scope: '全部项目与后台数据',
     permissions: ['增删项目', '编辑项目基础信息', '配置负责人', '查看全部进度', '同步飞书通讯录']
   },
   {
     key: 'editor',
-    role: '可编辑',
+    name: '可编辑',
     level: 'editor',
     scope: '自己负责的项目阶段、班组或部门',
     permissions: ['编辑负责阶段进度', '录入日报工时', '处理相关异常', '查看相关项目']
   },
   {
     key: 'viewer',
-    role: '可查看',
+    name: '可查看',
     level: 'viewer',
     scope: '与自己有关的项目',
     permissions: ['查看项目进度', '查看任务详情', '查看相关异常']
