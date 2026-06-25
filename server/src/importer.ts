@@ -275,7 +275,7 @@ function parseItem(row: ExcelJS.Row, rowNumber: number, sheetName: string, issue
     subtask('st-profile-in', '型材入库', progressColumns.profileIn),
     subtask('st-parts-in', '零配件入库', progressColumns.partsIn)
   ]);
-  const cuttingTask = task('tt-cutting', 'cutting', '下料加工', 'dept-production', cellText(row.getCell(14).value), undefined, [
+  const cuttingTask = task('tt-cutting', 'cutting', '开料加工', 'dept-production', cellText(row.getCell(14).value), undefined, [
     subtask('st-plate-cut', '板材套料切割', progressColumns.plateCut),
     subtask('st-plate-machine', '板材机加工', progressColumns.plateMachine),
     subtask('st-profile-cut', '型材套料切割', progressColumns.profileCut),

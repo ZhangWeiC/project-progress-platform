@@ -277,7 +277,7 @@ export function ProductionPlansPage() {
         extra={
           <Space size={4} wrap className="gantt-legend">
             <Tag color="green">装焊</Tag>
-            <Tag color="cyan">下料</Tag>
+            <Tag color="cyan">开料</Tag>
             <Tag color="purple">喷涂</Tag>
           </Space>
         }

@@ -630,7 +630,7 @@ function seedDatabase() {
   insertMany('task_template', [
     { id: 'tt-design', case_template_id: 'tpl-steel-v1', name: '设计', task_type: 'design', sort_order: 10, generation_scope: 'case', default_owner_department_id: 'dept-design', progress_rule: 'average', required: 1, skippable: 0 },
     { id: 'tt-material', case_template_id: 'tpl-steel-v1', name: '材料入库', task_type: 'material', sort_order: 20, generation_scope: 'item', default_owner_department_id: 'dept-material', progress_rule: 'average', required: 1, skippable: 0 },
-    { id: 'tt-cutting', case_template_id: 'tpl-steel-v1', name: '下料', task_type: 'cutting', sort_order: 30, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 },
+    { id: 'tt-cutting', case_template_id: 'tpl-steel-v1', name: '开料', task_type: 'cutting', sort_order: 30, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 },
     { id: 'tt-production', case_template_id: 'tpl-steel-v1', name: '装焊', task_type: 'production', sort_order: 40, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 },
     { id: 'tt-painting', case_template_id: 'tpl-steel-v1', name: '喷涂', task_type: 'painting', sort_order: 50, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 },
     { id: 'tt-inspection', case_template_id: 'tpl-steel-v1', name: '验收', task_type: 'inspection', sort_order: 60, generation_scope: 'item', default_owner_department_id: 'dept-quality', progress_rule: 'average', required: 1, skippable: 0 }
@@ -982,7 +982,7 @@ function migrateWorkflowModel() {
     db.prepare("UPDATE task_template SET name = '设计', task_type = 'design', sort_order = 10, generation_scope = 'case', progress_rule = 'average' WHERE id = 'tt-design'").run();
     db.prepare("UPDATE subtask_template SET name = '图纸定审', sort_order = 10 WHERE id = 'st-drawing-review'").run();
     db.prepare("UPDATE task_template SET sort_order = 20 WHERE id = 'tt-material'").run();
-    db.prepare("UPDATE task_template SET name = '下料', sort_order = 30 WHERE id = 'tt-cutting'").run();
+    db.prepare("UPDATE task_template SET name = '开料', sort_order = 30 WHERE id = 'tt-cutting'").run();
     db.prepare("UPDATE task_template SET name = '装焊', sort_order = 40 WHERE id = 'tt-production'").run();
     db.prepare("UPDATE task_template SET name = '喷涂', task_type = 'painting', sort_order = 50, generation_scope = 'item', progress_rule = 'average' WHERE id = 'tt-painting'").run();
     db.prepare("UPDATE task_template SET sort_order = 60 WHERE id = 'tt-inspection'").run();
