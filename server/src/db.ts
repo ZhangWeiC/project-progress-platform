@@ -983,6 +983,7 @@ function migrateWorkflowModel() {
     db.prepare("UPDATE subtask_template SET name = '图纸定审', sort_order = 10 WHERE id = 'st-drawing-review'").run();
     db.prepare("UPDATE task_template SET sort_order = 20 WHERE id = 'tt-material'").run();
     db.prepare("UPDATE task_template SET name = '开料', sort_order = 30 WHERE id = 'tt-cutting'").run();
+    db.prepare("UPDATE case_task SET name = replace(name, '下料', '开料') WHERE task_template_id = 'tt-cutting' AND name LIKE '%下料%'").run();
     db.prepare("UPDATE task_template SET name = '装焊', sort_order = 40 WHERE id = 'tt-production'").run();
     db.prepare("UPDATE task_template SET name = '喷涂', task_type = 'painting', sort_order = 50, generation_scope = 'item', progress_rule = 'average' WHERE id = 'tt-painting'").run();
     db.prepare("UPDATE task_template SET sort_order = 60 WHERE id = 'tt-inspection'").run();
