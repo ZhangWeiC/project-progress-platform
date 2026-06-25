@@ -193,6 +193,15 @@ type FeishuContactsResponse = {
   unassigned: FeishuContactEmployee[];
 };
 
+type FeishuContactTreeRow = {
+  id: string;
+  name: string;
+  row_type: 'department' | 'employee';
+  department?: FeishuContactDepartment;
+  employee?: FeishuContactEmployee;
+  children?: FeishuContactTreeRow[];
+};
+
 const permissionOptions = [
   { value: 'manager', label: '可管理' },
   { value: 'editor', label: '可编辑' },
@@ -277,30 +286,58 @@ function FeishuDepartmentTable({
   onDeleteEmployee: (employeeId: string) => void;
 }) {
   if (error) return <Alert type="error" message={error.message} />;
+  const rows = buildFeishuContactTree(contacts?.departments ?? []);
   return (
     <Space direction="vertical" size="small" style={{ width: '100%' }}>
       <Typography.Title level={5}>按部门展示</Typography.Title>
-      <Table<FeishuContactDepartment>
+      <Table<FeishuContactTreeRow>
         rowKey="id"
         size="small"
         loading={loading}
         pagination={false}
-        dataSource={contacts?.departments ?? []}
-        expandable={{
-          expandedRowRender: (department) => (
-            <EmployeeTable
-              rows={department.employees}
-              emptyText="该部门暂无人员"
-              deletingEmployeeId={deletingEmployeeId}
-              onEdit={onEditEmployee}
-              onDelete={onDeleteEmployee}
-            />
-          ),
-          rowExpandable: (department) => department.employees.length > 0 || Boolean(department.children?.length)
-        }}
+        indentSize={24}
+        dataSource={rows}
         columns={[
-          { title: '部门', dataIndex: 'name', render: (value) => value || '未命名部门' },
-          { title: '人员数', dataIndex: 'employees', width: 100, render: (employees: FeishuContactEmployee[]) => employees.length }
+          {
+            title: '部门 / 人员',
+            dataIndex: 'name',
+            render: (_value, row) => {
+              if (row.row_type === 'employee') return row.employee?.name ?? '-';
+              const department = row.department;
+              const childCount = department?.children?.length ?? 0;
+              return (
+                <Space size={6} wrap>
+                  <Typography.Text strong>{department?.name || '未命名部门'}</Typography.Text>
+                  {childCount > 0 ? <Tag>{childCount} 子部门</Tag> : null}
+                </Space>
+              );
+            }
+          },
+          {
+            title: '人员数 / 权限',
+            width: 140,
+            render: (_value, row) => {
+              if (row.row_type === 'employee') {
+                return <Tag color={permissionLevelColor(row.employee?.permission_level ?? 'viewer')}>{permissionLabel(row.employee?.permission_level ?? 'viewer')}</Tag>;
+              }
+              return `${row.department?.employees.length ?? 0}`;
+            }
+          },
+          {
+            title: '操作',
+            key: 'actions',
+            width: 96,
+            fixed: 'right',
+            align: 'right',
+            render: (_value, row) => row.employee ? (
+              <EmployeeActions
+                employee={row.employee}
+                deletingEmployeeId={deletingEmployeeId}
+                onEdit={onEditEmployee}
+                onDelete={onDeleteEmployee}
+              />
+            ) : null
+          }
         ]}
       />
       {contacts?.unassigned?.length ? (
@@ -316,6 +353,30 @@ function FeishuDepartmentTable({
       ) : null}
     </Space>
   );
+}
+
+function buildFeishuContactTree(departments: FeishuContactDepartment[]): FeishuContactTreeRow[] {
+  return departments.map((department) => buildFeishuDepartmentRow(department));
+}
+
+function buildFeishuDepartmentRow(department: FeishuContactDepartment): FeishuContactTreeRow {
+  const children = [
+    ...(department.children ?? []).map((child) => buildFeishuDepartmentRow(child)),
+    ...department.employees.map((employee) => ({
+      id: `${department.id}-${employee.id}`,
+      name: employee.name,
+      row_type: 'employee' as const,
+      employee
+    }))
+  ];
+
+  return {
+    id: department.id,
+    name: department.name,
+    row_type: 'department',
+    department,
+    children: children.length > 0 ? children : undefined
+  };
 }
 
 function EmployeeTable({
@@ -353,28 +414,42 @@ function EmployeeTable({
           width: 96,
           fixed: 'right',
           align: 'right',
-          render: (_value, row) => (
-            <Space size={2}>
-              <Tooltip title="编辑人员">
-                <Button type="text" size="small" aria-label="编辑人员" icon={<EditOutlined />} onClick={() => onEdit(row)} />
-              </Tooltip>
-              <Tooltip title="删除人员">
-                <Popconfirm
-                  title="删除通讯录人员"
-                  description="会从平台通讯录和负责人选择中移除，历史记录保留。确认删除？"
-                  okText="删除"
-                  cancelText="取消"
-                  okButtonProps={{ danger: true }}
-                  onConfirm={() => onDelete(row.id)}
-                >
-                  <Button type="text" danger size="small" aria-label="删除人员" icon={<DeleteOutlined />} loading={deletingEmployeeId === row.id} />
-                </Popconfirm>
-              </Tooltip>
-            </Space>
-          )
+          render: (_value, row) => <EmployeeActions employee={row} deletingEmployeeId={deletingEmployeeId} onEdit={onEdit} onDelete={onDelete} />
         }
       ]}
     />
+  );
+}
+
+function EmployeeActions({
+  employee,
+  deletingEmployeeId,
+  onEdit,
+  onDelete
+}: {
+  employee: FeishuContactEmployee;
+  deletingEmployeeId?: string;
+  onEdit: (employee: FeishuContactEmployee) => void;
+  onDelete: (employeeId: string) => void;
+}) {
+  return (
+    <Space size={2}>
+      <Tooltip title="编辑人员">
+        <Button type="text" size="small" aria-label="编辑人员" icon={<EditOutlined />} onClick={() => onEdit(employee)} />
+      </Tooltip>
+      <Tooltip title="删除人员">
+        <Popconfirm
+          title="删除通讯录人员"
+          description="会从平台通讯录和负责人选择中移除，历史记录保留。确认删除？"
+          okText="删除"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+          onConfirm={() => onDelete(employee.id)}
+        >
+          <Button type="text" danger size="small" aria-label="删除人员" icon={<DeleteOutlined />} loading={deletingEmployeeId === employee.id} />
+        </Popconfirm>
+      </Tooltip>
+    </Space>
   );
 }
 
