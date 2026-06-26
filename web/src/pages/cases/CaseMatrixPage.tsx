@@ -29,12 +29,14 @@ const DELIVERY_STATUS_COLORS: Record<string, string> = {
 };
 
 type ProjectCaseFormValues = ProjectCasePayload & {
-  business_owner_value?: string | null;
-  design_owner_value?: string | null;
-  stage_owner_values?: Record<string, string | null | undefined>;
+  business_owner_value?: OwnerSelectValue | null;
+  design_owner_value?: OwnerSelectValue | null;
+  stage_owner_values?: Record<string, OwnerSelectValue | null | undefined>;
 };
 
 type StageDefinition = Pick<ProjectStageOwner, 'task_type' | 'task_name' | 'generation_scope' | 'sort_order' | 'owner_department_name' | 'assignee_id' | 'team_id' | 'department_id' | 'mixed'>;
+
+type OwnerSelectValue = string | { value?: string | null; label?: string | null };
 
 type DeliveryFormValues = {
   delivery_date?: string | null;
@@ -944,6 +946,7 @@ function OwnerTreeSelect({
   return (
     <TreeSelect
       allowClear
+      labelInValue
       showSearch
       treeDefaultExpandAll
       placeholder={placeholder}
@@ -973,10 +976,10 @@ function projectToForm(project: ProjectCase): ProjectCaseFormValues {
     customer_name: project.customer_name ?? null,
     business_owner_id: project.business_owner_id ?? null,
     business_owner_department_id: project.business_owner_department_id ?? null,
-    business_owner_value: encodeOwnerTarget(project.business_owner_id ?? null, project.business_owner_department_id ?? null),
+    business_owner_value: encodeOwnerTarget(project.business_owner_id ?? null, project.business_owner_department_id ?? null, project.business_owner_name),
     design_owner_id: project.design_owner_id ?? null,
     design_owner_department_id: project.design_owner_department_id ?? null,
-    design_owner_value: encodeOwnerTarget(project.design_owner_id ?? null, project.design_owner_department_id ?? null),
+    design_owner_value: encodeOwnerTarget(project.design_owner_id ?? null, project.design_owner_department_id ?? null, project.design_owner_name),
     estimated_weight: project.estimated_weight ?? null,
     delivery_date: project.delivery_date ?? null,
     items: project.items?.length
@@ -1028,26 +1031,31 @@ function normalizeProjectPayload(values: ProjectCaseFormValues, stages: StageDef
   };
 }
 
-function encodeOwnerValue(stage: Pick<ProjectStageOwner, 'assignee_id' | 'team_id' | 'department_id'>) {
-  if (stage.assignee_id) return `employee:${stage.assignee_id}`;
-  if (stage.team_id) return `team:${stage.team_id}`;
-  if (stage.department_id) return `department:${stage.department_id}`;
+function encodeOwnerValue(stage: Pick<ProjectStageOwner, 'assignee_id' | 'assignee_name' | 'team_id' | 'team_name' | 'department_id' | 'department_name'>) {
+  if (stage.assignee_id) return buildOwnerSelectValue(`employee:${stage.assignee_id}`, stage.assignee_name);
+  if (stage.team_id) return buildOwnerSelectValue(`team:${stage.team_id}`, stage.team_name);
+  if (stage.department_id) return buildOwnerSelectValue(`department:${stage.department_id}`, stage.department_name);
   return undefined;
 }
 
-function decodeOwnerValue(value: string | null | undefined) {
-  if (!value) return { assignee_id: null, team_id: null, department_id: null };
-  const [type, id] = value.split(':');
+function decodeOwnerValue(value: OwnerSelectValue | null | undefined) {
+  const rawValue = typeof value === 'string' ? value : value?.value;
+  if (!rawValue) return { assignee_id: null, team_id: null, department_id: null };
+  const [type, id] = rawValue.split(':');
   if (type === 'employee') return { assignee_id: id, team_id: null, department_id: null };
   if (type === 'team') return { assignee_id: null, team_id: id, department_id: null };
   if (type === 'department') return { assignee_id: null, team_id: null, department_id: id };
   return { assignee_id: null, team_id: null, department_id: null };
 }
 
-function encodeOwnerTarget(employeeId?: string | null, departmentId?: string | null) {
-  if (employeeId) return `employee:${employeeId}`;
-  if (departmentId) return `department:${departmentId}`;
+function encodeOwnerTarget(employeeId?: string | null, departmentId?: string | null, label?: string | null) {
+  if (employeeId) return buildOwnerSelectValue(`employee:${employeeId}`, label);
+  if (departmentId) return buildOwnerSelectValue(`department:${departmentId}`, label);
   return undefined;
+}
+
+function buildOwnerSelectValue(value: string, label?: string | null): OwnerSelectValue {
+  return { value, label: label || value };
 }
 
 function currentMonth() {
