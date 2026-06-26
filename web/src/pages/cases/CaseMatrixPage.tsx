@@ -82,10 +82,12 @@ export function CaseMatrixPage() {
   const stageDefinitions = useMemo(() => stageDefinitionsFromColumns(matrixQuery.data?.columns ?? []), [matrixQuery.data?.columns]);
 
   const filteredRows = useMemo(() => filterRows(rows, searchKeyword, deliveryStatusFilter), [rows, searchKeyword, deliveryStatusFilter]);
-  const activeExpandedRowKeys = searchKeyword.trim() || deliveryStatusFilter
-    ? filteredRows.filter((row) => row.row_type === 'project').map((row) => row.row_id ?? row.case_item_id)
-    : expandedRowKeys;
-  const hasManualExpandedRows = expandedRowKeys.length > 0;
+  const visibleProjectRowKeys = useMemo(
+    () => filteredRows.filter((row) => row.row_type === 'project').map((row) => row.row_id ?? row.case_item_id),
+    [filteredRows]
+  );
+  const expandableProjectRowKeys = visibleProjectRowKeys.length ? visibleProjectRowKeys : projectRowKeys;
+  const hasManualExpandedRows = visibleProjectRowKeys.some((key) => expandedRowKeys.includes(key));
 
   const refreshProjectQueries = async () => {
     await Promise.all([
@@ -221,7 +223,7 @@ export function CaseMatrixPage() {
             />
             <Button
               icon={hasManualExpandedRows ? <CompressOutlined /> : <ExpandAltOutlined />}
-              onClick={() => setExpandedRowKeys(hasManualExpandedRows ? [] : projectRowKeys)}
+              onClick={() => setExpandedRowKeys(hasManualExpandedRows ? [] : expandableProjectRowKeys)}
             >
               {hasManualExpandedRows ? '折叠' : '展开'}
             </Button>
@@ -251,7 +253,7 @@ export function CaseMatrixPage() {
           scroll={{ x: 2700, y: 'calc(100vh - 178px)' }}
           onChange={handleTableChange}
           expandable={{
-            expandedRowKeys: activeExpandedRowKeys,
+            expandedRowKeys,
             onExpandedRowsChange: (keys) => setExpandedRowKeys([...keys]),
             indentSize: 14,
             expandIcon: (props) => (
