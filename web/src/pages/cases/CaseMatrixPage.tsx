@@ -3,7 +3,7 @@ import { Button, Card, Divider, Form, Input, InputNumber, Modal, Popconfirm, Sel
 import type { TableProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Key, MouseEvent } from 'react';
 import { TaskDrawer } from '../../components/drawers/TaskDrawer';
 import { ProgressCell } from '../../components/matrix/ProgressCell';
@@ -801,6 +801,11 @@ type ProjectCaseModalProps = {
 
 function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinitions, loading, onCancel, onFinish }: ProjectCaseModalProps) {
   const ownerTrees = lookups?.owner_trees ?? {};
+  useEffect(() => {
+    if (!open || !editingProject) return;
+    form.setFieldsValue(projectToForm(editingProject));
+  }, [editingProject?.id, form, open]);
+
   return (
     <Modal
       title={editingProject ? '编辑项目' : '新增项目'}
@@ -811,6 +816,7 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
       confirmLoading={loading}
       width={920}
       destroyOnClose
+      forceRender
     >
       <Form form={form} layout="vertical" onFinish={onFinish}>
         <div className="project-form-grid">

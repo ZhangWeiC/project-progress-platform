@@ -454,6 +454,7 @@ export function buildOwnerLookupTrees() {
 
 export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
   assertCanManageProjects(user);
+  input = normalizeProjectOwnerInput(input);
   const name = input.name?.trim();
   if (!name) {
     const err = new Error('请输入项目名称');
@@ -509,6 +510,7 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
 
 export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput, user: CurrentUser) {
   assertCanManageProjects(user);
+  input = normalizeProjectOwnerInput(input);
   validateEmployee(input.business_owner_id);
   validateDepartment(input.business_owner_department_id);
   validateEmployee(input.design_owner_id);
@@ -732,6 +734,10 @@ function getProjectStageOwners(projectCaseId: string) {
     const ownerList = Array.from(uniqueOwners.values());
     const mixed = ownerList.length > 1;
     const owner = !mixed && ownerList.length === 1 ? ownerList[0] : undefined;
+    const departmentId = owner?.assignee_id || owner?.team_id ? null : resolveActiveDepartmentId(owner?.department_id ?? null);
+    const departmentName = departmentId
+      ? (db.prepare('SELECT name FROM department WHERE id = ?').get(departmentId) as { name: string } | undefined)?.name ?? owner?.department_name ?? null
+      : null;
     return {
       task_type: template.task_type,
       task_name: template.task_name,
@@ -742,8 +748,8 @@ function getProjectStageOwners(projectCaseId: string) {
       assignee_name: owner?.assignee_name ?? null,
       team_id: owner?.team_id ?? null,
       team_name: owner?.team_name ?? null,
-      department_id: owner?.assignee_id || owner?.team_id ? null : owner?.department_id ?? null,
-      department_name: owner?.assignee_id || owner?.team_id ? null : owner?.department_name ?? null,
+      department_id: departmentId,
+      department_name: departmentName,
       mixed
     };
   });
@@ -904,7 +910,7 @@ function stageOwnerInputMap(stageOwners: ProjectCaseStageOwnerInput[] | undefine
     map.set(owner.task_type, {
       assignee_id: owner.assignee_id ?? null,
       team_id: owner.team_id ?? null,
-      department_id: owner.department_id ?? null
+      department_id: resolveActiveDepartmentId(owner.department_id ?? null)
     });
   }
   return map;
@@ -1129,6 +1135,75 @@ function validateStageOwners(stageOwners: ProjectCaseStageOwnerInput[] | undefin
     validateTeam(owner.team_id);
     validateDepartment(owner.department_id);
   }
+}
+
+const LEGACY_DEPARTMENT_TARGET_NAMES: Record<string, string> = {
+  'dept-material': '采购部',
+  'dept-quality': '质安组',
+  '材料仓储': '采购部',
+  '质检部': '质安组'
+};
+
+function normalizeProjectOwnerInput(input: ProjectCaseInput): ProjectCaseInput {
+  return {
+    ...input,
+    business_owner_id: input.business_owner_id === undefined ? undefined : resolveCanonicalEmployeeId(input.business_owner_id),
+    business_owner_department_id: input.business_owner_department_id === undefined ? undefined : resolveActiveDepartmentId(input.business_owner_department_id),
+    design_owner_id: input.design_owner_id === undefined ? undefined : resolveCanonicalEmployeeId(input.design_owner_id),
+    design_owner_department_id: input.design_owner_department_id === undefined ? undefined : resolveActiveDepartmentId(input.design_owner_department_id),
+    stage_owners: input.stage_owners?.map((owner) => ({
+      ...owner,
+      assignee_id: owner.assignee_id === undefined ? undefined : resolveCanonicalEmployeeId(owner.assignee_id),
+      department_id: owner.department_id === undefined ? undefined : resolveActiveDepartmentId(owner.department_id)
+    }))
+  };
+}
+
+function resolveCanonicalEmployeeId(employeeId: string | null | undefined) {
+  if (!employeeId) return null;
+  const employee = db
+    .prepare('SELECT id, name FROM employee WHERE id = ?')
+    .get(employeeId) as { id: string; name: string } | undefined;
+  if (!employee) return employeeId;
+  const canonical = db
+    .prepare(
+      `SELECT id
+       FROM employee
+       WHERE name = ?
+       ORDER BY
+         CASE WHEN COALESCE(is_active, 1) = 1 THEN 0 ELSE 1 END,
+         CASE WHEN feishu_open_id IS NOT NULL OR feishu_user_id IS NOT NULL OR feishu_union_id IS NOT NULL THEN 0 ELSE 1 END,
+         CASE WHEN id = ? THEN 0 ELSE 1 END,
+         id
+       LIMIT 1`
+    )
+    .get(employee.name, employeeId) as { id: string } | undefined;
+  return canonical?.id ?? employeeId;
+}
+
+function resolveActiveDepartmentId(departmentId: string | null | undefined) {
+  if (!departmentId) return null;
+  const department = db
+    .prepare('SELECT id, name, status FROM department WHERE id = ?')
+    .get(departmentId) as { id: string; name: string; status: string | null } | undefined;
+  if (department && (!department.status || department.status !== 'deleted') && !LEGACY_DEPARTMENT_TARGET_NAMES[department.id] && !LEGACY_DEPARTMENT_TARGET_NAMES[department.name]) {
+    return department.id;
+  }
+  const targetName = LEGACY_DEPARTMENT_TARGET_NAMES[departmentId] ?? (department ? LEGACY_DEPARTMENT_TARGET_NAMES[department.name] ?? department.name : null);
+  if (!targetName) return departmentId;
+  const canonical = db
+    .prepare(
+      `SELECT id
+       FROM department
+       WHERE name = ?
+         AND (status IS NULL OR status != 'deleted')
+       ORDER BY
+         CASE WHEN feishu_open_department_id IS NOT NULL OR feishu_department_id IS NOT NULL THEN 0 ELSE 1 END,
+         id
+       LIMIT 1`
+    )
+    .get(targetName) as { id: string } | undefined;
+  return canonical?.id ?? departmentId;
 }
 
 function normalizeText(value: string | null | undefined) {

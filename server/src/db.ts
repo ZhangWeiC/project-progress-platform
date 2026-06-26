@@ -404,6 +404,7 @@ export function initializeDatabase() {
   hideLegacyLocalDepartments();
   seedCredentials();
   migrateWorkflowModel();
+  normalizeLegacyFeishuReferences();
   seedProductionPlans();
   migrateWorkLogProductionPlanLink();
 }
@@ -520,6 +521,159 @@ function hideLegacyLocalDepartments() {
        AND feishu_department_id IS NULL
        AND feishu_open_department_id IS NULL`
   ).run();
+}
+
+const LEGACY_DEPARTMENT_TARGET_NAMES: Record<string, string> = {
+  'dept-material': '采购部',
+  'dept-quality': '质安组',
+  '材料仓储': '采购部',
+  '质检部': '质安组'
+};
+
+function normalizeLegacyFeishuReferences() {
+  const departmentMap = buildCanonicalDepartmentMap();
+  const employeeMap = buildCanonicalEmployeeMap();
+  const tx = db.transaction(() => {
+    for (const [fromId, toId] of departmentMap.entries()) {
+      moveDepartmentReferences(fromId, toId);
+    }
+    for (const [fromId, toId] of employeeMap.entries()) {
+      moveEmployeeReferences(fromId, toId);
+    }
+  });
+  tx();
+}
+
+function buildCanonicalDepartmentMap() {
+  const rows = db.prepare('SELECT id, name, status FROM department').all() as Array<{
+    id: string;
+    name: string;
+    status: string | null;
+  }>;
+  const mappings = new Map<string, string>();
+  for (const row of rows) {
+    const targetName = LEGACY_DEPARTMENT_TARGET_NAMES[row.id] ?? LEGACY_DEPARTMENT_TARGET_NAMES[row.name] ?? row.name;
+    const target = findCanonicalDepartmentByName(targetName);
+    if (!target || target === row.id) continue;
+    const isDeleted = row.status === 'deleted';
+    const isLegacyAlias = Boolean(LEGACY_DEPARTMENT_TARGET_NAMES[row.id] || LEGACY_DEPARTMENT_TARGET_NAMES[row.name]);
+    if (isDeleted || isLegacyAlias) mappings.set(row.id, target);
+  }
+  return mappings;
+}
+
+function findCanonicalDepartmentByName(name: string) {
+  const row = db
+    .prepare(
+      `SELECT id
+       FROM department
+       WHERE name = ?
+         AND (status IS NULL OR status != 'deleted')
+       ORDER BY
+         CASE WHEN feishu_open_department_id IS NOT NULL OR feishu_department_id IS NOT NULL THEN 0 ELSE 1 END,
+         id
+       LIMIT 1`
+    )
+    .get(name) as { id: string } | undefined;
+  return row?.id ?? null;
+}
+
+function moveDepartmentReferences(fromId: string, toId: string) {
+  db.prepare(
+    `INSERT OR IGNORE INTO employee_department (employee_id, department_id, is_primary, source, locally_removed, last_feishu_sync_at)
+     SELECT employee_id, ?, is_primary, source, locally_removed, last_feishu_sync_at
+     FROM employee_department
+     WHERE department_id = ?`
+  ).run(toId, fromId);
+  db.prepare('DELETE FROM employee_department WHERE department_id = ?').run(fromId);
+  updateReferenceColumn('employee', 'department_id', fromId, toId);
+  updateReferenceColumn('department', 'parent_department_id', fromId, toId);
+  updateReferenceColumn('project_case', 'business_owner_department_id', fromId, toId);
+  updateReferenceColumn('project_case', 'design_owner_department_id', fromId, toId);
+  updateReferenceColumn('task_template', 'default_owner_department_id', fromId, toId);
+  updateReferenceColumn('case_task', 'owner_department_id', fromId, toId);
+  updateReferenceColumn('exception_record', 'created_department_id', fromId, toId);
+  updateReferenceColumn('exception_record', 'responsible_department_id', fromId, toId);
+  updateReferenceColumn('production_plan', 'department_id', fromId, toId);
+}
+
+function buildCanonicalEmployeeMap() {
+  const rows = db.prepare(
+    `SELECT id, name, is_active, feishu_open_id, feishu_union_id, feishu_user_id
+     FROM employee
+     ORDER BY name, id`
+  ).all() as Array<{
+    id: string;
+    name: string;
+    is_active: number | null;
+    feishu_open_id: string | null;
+    feishu_union_id: string | null;
+    feishu_user_id: string | null;
+  }>;
+  const byName = new Map<string, typeof rows>();
+  for (const row of rows) byName.set(row.name, [...(byName.get(row.name) ?? []), row]);
+  const mappings = new Map<string, string>();
+  for (const group of byName.values()) {
+    if (group.length < 2) continue;
+    const canonical = [...group].sort(compareCanonicalEmployee)[0];
+    for (const row of group) {
+      if (row.id !== canonical.id) mappings.set(row.id, canonical.id);
+    }
+  }
+  return mappings;
+}
+
+function compareCanonicalEmployee(left: {
+  id: string;
+  is_active: number | null;
+  feishu_open_id: string | null;
+  feishu_union_id: string | null;
+  feishu_user_id: string | null;
+}, right: {
+  id: string;
+  is_active: number | null;
+  feishu_open_id: string | null;
+  feishu_union_id: string | null;
+  feishu_user_id: string | null;
+}) {
+  const activeDiff = Number(right.is_active ?? 1) - Number(left.is_active ?? 1);
+  if (activeDiff) return activeDiff;
+  const leftFeishu = left.feishu_open_id || left.feishu_union_id || left.feishu_user_id ? 1 : 0;
+  const rightFeishu = right.feishu_open_id || right.feishu_union_id || right.feishu_user_id ? 1 : 0;
+  const feishuDiff = rightFeishu - leftFeishu;
+  if (feishuDiff) return feishuDiff;
+  return left.id.localeCompare(right.id);
+}
+
+function moveEmployeeReferences(fromId: string, toId: string) {
+  db.prepare(
+    `INSERT OR IGNORE INTO employee_department (employee_id, department_id, is_primary, source, locally_removed, last_feishu_sync_at)
+     SELECT ?, department_id, is_primary, source, locally_removed, last_feishu_sync_at
+     FROM employee_department
+     WHERE employee_id = ?`
+  ).run(toId, fromId);
+  db.prepare('DELETE FROM employee_department WHERE employee_id = ?').run(fromId);
+  db.prepare('DELETE FROM user_credential WHERE employee_id = ? AND EXISTS (SELECT 1 FROM user_credential WHERE employee_id = ?)').run(fromId, toId);
+  updateReferenceColumn('user_credential', 'employee_id', fromId, toId);
+  updateReferenceColumn('auth_session', 'employee_id', fromId, toId);
+  updateReferenceColumn('team', 'leader_id', fromId, toId);
+  updateReferenceColumn('project_case', 'business_owner_id', fromId, toId);
+  updateReferenceColumn('project_case', 'design_owner_id', fromId, toId);
+  updateReferenceColumn('case_task', 'assignee_id', fromId, toId);
+  updateReferenceColumn('case_subtask', 'assignee_id', fromId, toId);
+  updateReferenceColumn('project_case_member', 'user_id', fromId, toId);
+  updateReferenceColumn('progress_log', 'changed_by', fromId, toId);
+  updateReferenceColumn('work_log_entry', 'actual_employee_id', fromId, toId);
+  updateReferenceColumn('work_log_entry', 'input_by', fromId, toId);
+  updateReferenceColumn('exception_record', 'created_by', fromId, toId);
+  updateReferenceColumn('exception_record', 'current_handler_id', fromId, toId);
+  updateReferenceColumn('exception_comment', 'author_id', fromId, toId);
+  updateReferenceColumn('import_task', 'created_by', fromId, toId);
+  db.prepare('UPDATE employee SET is_active = 0, locally_disabled = 1 WHERE id = ?').run(fromId);
+}
+
+function updateReferenceColumn(table: string, column: string, fromValue: string, toValue: string) {
+  db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`).run(toValue, fromValue);
 }
 
 function migrateProjectAssociatedMonth() {
