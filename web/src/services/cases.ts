@@ -9,14 +9,16 @@ export type ProjectCasePayload = {
   category?: string | null;
   customer_name?: string | null;
   business_owner_id?: string | null;
+  business_owner_department_id?: string | null;
   design_owner_id?: string | null;
+  design_owner_department_id?: string | null;
   estimated_weight?: number | null;
   delivery_date?: string | null;
   delivery_status?: string | null;
   delivery_remark?: string | null;
   associated_month?: string | null;
   items?: Array<{ id?: string | null; name: string; delivery_date?: string | null; delivery_status?: string | null; delivery_remark?: string | null }>;
-  stage_owners?: Array<{ task_type: string; assignee_id?: string | null; team_id?: string | null }>;
+  stage_owners?: Array<{ task_type: string; assignee_id?: string | null; team_id?: string | null; department_id?: string | null }>;
 };
 
 export const createProjectCase = (payload: ProjectCasePayload) =>

@@ -1,5 +1,5 @@
 import { CompressOutlined, DeleteOutlined, EditOutlined, ExpandAltOutlined, MinusOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
-import { Button, Card, Divider, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Divider, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, TreeSelect, Typography, message } from 'antd';
 import type { TableProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -29,10 +29,12 @@ const DELIVERY_STATUS_COLORS: Record<string, string> = {
 };
 
 type ProjectCaseFormValues = ProjectCasePayload & {
+  business_owner_value?: string | null;
+  design_owner_value?: string | null;
   stage_owner_values?: Record<string, string | null | undefined>;
 };
 
-type StageDefinition = Pick<ProjectStageOwner, 'task_type' | 'task_name' | 'generation_scope' | 'sort_order' | 'owner_department_name' | 'assignee_id' | 'team_id' | 'mixed'>;
+type StageDefinition = Pick<ProjectStageOwner, 'task_type' | 'task_name' | 'generation_scope' | 'sort_order' | 'owner_department_name' | 'assignee_id' | 'team_id' | 'department_id' | 'mixed'>;
 
 type DeliveryFormValues = {
   delivery_date?: string | null;
@@ -798,26 +800,7 @@ type ProjectCaseModalProps = {
 };
 
 function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinitions, loading, onCancel, onFinish }: ProjectCaseModalProps) {
-  const employeeOptions = (lookups?.employees ?? []).map((employee) => ({
-    label: employee.name,
-    value: employee.id
-  }));
-  const ownerOptions = [
-    {
-      label: '人员',
-      options: (lookups?.employees ?? []).map((employee) => ({
-        label: employee.name,
-        value: `employee:${employee.id}`
-      }))
-    },
-    {
-      label: '班组',
-      options: (lookups?.teams ?? []).map((team) => ({
-        label: team.name,
-        value: `team:${team.id}`
-      }))
-    }
-  ];
+  const ownerTrees = lookups?.owner_trees ?? {};
   return (
     <Modal
       title={editingProject ? '编辑项目' : '新增项目'}
@@ -853,8 +836,8 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
           <Form.Item label="预估重量(T)" name="estimated_weight">
             <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="可选" />
           </Form.Item>
-          <Form.Item label="业务部负责人" name="business_owner_id">
-            <Select allowClear showSearch placeholder="选择业务部负责人" options={employeeOptions} optionFilterProp="label" />
+          <Form.Item label="业务部负责人" name="business_owner_value">
+            <OwnerTreeSelect placeholder="选择业务部负责人" treeData={ownerTrees.business ?? []} />
           </Form.Item>
           <Form.Item label="交付日期" name="delivery_date">
             <Input placeholder="YYYY-MM-DD" />
@@ -933,12 +916,9 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
               name={['stage_owner_values', stage.task_type]}
               tooltip={stage.owner_department_name || undefined}
             >
-              <Select
-                allowClear
-                showSearch
+              <OwnerTreeSelect
                 placeholder={stage.mixed ? '多个负责人' : '选择负责人'}
-                options={ownerOptions}
-                optionFilterProp="label"
+                treeData={ownerTrees[stageOwnerTreeKey(stage.task_type)] ?? []}
               />
             </Form.Item>
           ))}
@@ -946,6 +926,36 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
       </Form>
     </Modal>
   );
+}
+
+function OwnerTreeSelect({
+  placeholder,
+  treeData
+}: {
+  placeholder: string;
+  treeData: NonNullable<LookupResponse['owner_trees']>[string];
+}) {
+  return (
+    <TreeSelect
+      allowClear
+      showSearch
+      treeDefaultExpandAll
+      placeholder={placeholder}
+      treeData={treeData}
+      treeNodeFilterProp="title"
+      style={{ width: '100%' }}
+    />
+  );
+}
+
+function stageOwnerTreeKey(taskType: string) {
+  if (taskType === 'material') return 'material';
+  if (taskType === 'cutting') return 'cutting';
+  if (taskType === 'production') return 'production';
+  if (taskType === 'painting') return 'painting';
+  if (taskType === 'inspection') return 'inspection';
+  if (taskType === 'design') return 'design';
+  return taskType;
 }
 
 function projectToForm(project: ProjectCase): ProjectCaseFormValues {
@@ -956,7 +966,11 @@ function projectToForm(project: ProjectCase): ProjectCaseFormValues {
     associated_month: project.associated_month ?? null,
     customer_name: project.customer_name ?? null,
     business_owner_id: project.business_owner_id ?? null,
+    business_owner_department_id: project.business_owner_department_id ?? null,
+    business_owner_value: encodeOwnerTarget(project.business_owner_id ?? null, project.business_owner_department_id ?? null),
     design_owner_id: project.design_owner_id ?? null,
+    design_owner_department_id: project.design_owner_department_id ?? null,
+    design_owner_value: encodeOwnerTarget(project.design_owner_id ?? null, project.design_owner_department_id ?? null),
     estimated_weight: project.estimated_weight ?? null,
     delivery_date: project.delivery_date ?? null,
     items: project.items?.length
@@ -989,15 +1003,18 @@ function normalizeProjectPayload(values: ProjectCaseFormValues, stages: StageDef
     ...decodeOwnerValue(values.stage_owner_values?.[stage.task_type])
   }));
   const designStageOwner = stageOwners.find((stage) => stage.task_type === 'design');
-  const designOwner = designStageOwner ? designStageOwner.assignee_id ?? null : values.design_owner_id ?? null;
+  const businessOwner = decodeOwnerValue(values.business_owner_value);
+  const designOwner = designStageOwner ?? decodeOwnerValue(values.design_owner_value);
   return {
     code: values.code ?? null,
     name: values.name,
     category: values.category ?? null,
     associated_month: values.associated_month ?? null,
     customer_name: values.customer_name ?? null,
-    business_owner_id: values.business_owner_id ?? null,
-    design_owner_id: designOwner,
+    business_owner_id: businessOwner.assignee_id ?? null,
+    business_owner_department_id: businessOwner.department_id ?? null,
+    design_owner_id: designOwner.assignee_id ?? null,
+    design_owner_department_id: designOwner.department_id ?? null,
     estimated_weight: values.estimated_weight ?? null,
     delivery_date: values.delivery_date ?? null,
     items,
@@ -1005,18 +1022,26 @@ function normalizeProjectPayload(values: ProjectCaseFormValues, stages: StageDef
   };
 }
 
-function encodeOwnerValue(stage: Pick<ProjectStageOwner, 'assignee_id' | 'team_id'>) {
+function encodeOwnerValue(stage: Pick<ProjectStageOwner, 'assignee_id' | 'team_id' | 'department_id'>) {
   if (stage.assignee_id) return `employee:${stage.assignee_id}`;
   if (stage.team_id) return `team:${stage.team_id}`;
+  if (stage.department_id) return `department:${stage.department_id}`;
   return undefined;
 }
 
 function decodeOwnerValue(value: string | null | undefined) {
-  if (!value) return { assignee_id: null, team_id: null };
+  if (!value) return { assignee_id: null, team_id: null, department_id: null };
   const [type, id] = value.split(':');
-  if (type === 'employee') return { assignee_id: id, team_id: null };
-  if (type === 'team') return { assignee_id: null, team_id: id };
-  return { assignee_id: null, team_id: null };
+  if (type === 'employee') return { assignee_id: id, team_id: null, department_id: null };
+  if (type === 'team') return { assignee_id: null, team_id: id, department_id: null };
+  if (type === 'department') return { assignee_id: null, team_id: null, department_id: id };
+  return { assignee_id: null, team_id: null, department_id: null };
+}
+
+function encodeOwnerTarget(employeeId?: string | null, departmentId?: string | null) {
+  if (employeeId) return `employee:${employeeId}`;
+  if (departmentId) return `department:${departmentId}`;
+  return undefined;
 }
 
 function currentMonth() {

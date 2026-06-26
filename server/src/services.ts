@@ -17,7 +17,7 @@ export function assertCanReadCase(user: CurrentUser, projectCaseId: string) {
   const membership = db
     .prepare('SELECT 1 FROM project_case_member WHERE project_case_id = ? AND user_id = ?')
     .get(projectCaseId, user.id);
-  if (!membership) {
+  if (!membership && !canAccessCaseByOwner(user, projectCaseId)) {
     const err = new Error('当前用户不能查看该项目');
     err.name = 'PERMISSION_DENIED';
     throw err;
@@ -42,11 +42,12 @@ export function assertCanManageProjects(user: CurrentUser) {
 export function canEditTask(user: CurrentUser, taskId: string) {
   if (!canEditProgress(user)) return false;
   if (canManageProjects(user)) return true;
-  const task = db.prepare('SELECT assignee_id, team_id FROM case_task WHERE id = ?').get(taskId) as
-    | { assignee_id: string | null; team_id: string | null }
+  const task = db.prepare('SELECT assignee_id, team_id, owner_department_id FROM case_task WHERE id = ?').get(taskId) as
+    | { assignee_id: string | null; team_id: string | null; owner_department_id: string | null }
     | undefined;
   if (!task) return false;
   if (task.assignee_id === user.id) return true;
+  if (task.owner_department_id && canLeadDepartmentOrAncestor(user.id, task.owner_department_id)) return true;
   if (task.team_id) {
     const team = db.prepare('SELECT 1 FROM team WHERE id = ? AND leader_id = ?').get(task.team_id, user.id);
     if (team) return true;
@@ -59,22 +60,205 @@ export function canEditSubtask(user: CurrentUser, subtaskId: string) {
   if (canManageProjects(user)) return true;
   const subtask = db
     .prepare(
-      `SELECT s.assignee_id, s.team_id, s.case_task_id, t.assignee_id as task_assignee_id, t.team_id as task_team_id
+      `SELECT s.assignee_id, s.team_id, s.case_task_id, t.assignee_id as task_assignee_id,
+              t.team_id as task_team_id, t.owner_department_id as task_owner_department_id
        FROM case_subtask s
        JOIN case_task t ON t.id = s.case_task_id
        WHERE s.id = ?`
     )
     .get(subtaskId) as
-    | { assignee_id: string | null; team_id: string | null; case_task_id: string; task_assignee_id: string | null; task_team_id: string | null }
+    | {
+        assignee_id: string | null;
+        team_id: string | null;
+        case_task_id: string;
+        task_assignee_id: string | null;
+        task_team_id: string | null;
+        task_owner_department_id: string | null;
+      }
     | undefined;
   if (!subtask) return false;
   if (subtask.assignee_id === user.id || subtask.task_assignee_id === user.id) return true;
+  if (subtask.task_owner_department_id && canLeadDepartmentOrAncestor(user.id, subtask.task_owner_department_id)) return true;
   const teamId = subtask.team_id ?? subtask.task_team_id;
   if (teamId) {
     const team = db.prepare('SELECT 1 FROM team WHERE id = ? AND leader_id = ?').get(teamId, user.id);
     if (team) return true;
   }
   return false;
+}
+
+function canAccessCaseByOwner(user: CurrentUser, projectCaseId: string) {
+  const project = db
+    .prepare('SELECT business_owner_id, business_owner_department_id, design_owner_id, design_owner_department_id FROM project_case WHERE id = ?')
+    .get(projectCaseId) as
+    | {
+        business_owner_id: string | null;
+        business_owner_department_id: string | null;
+        design_owner_id: string | null;
+        design_owner_department_id: string | null;
+      }
+    | undefined;
+  if (!project) return false;
+  if (project.business_owner_id === user.id || project.design_owner_id === user.id) return true;
+  if (project.business_owner_department_id && canLeadDepartmentOrAncestor(user.id, project.business_owner_department_id)) return true;
+  if (project.design_owner_department_id && canLeadDepartmentOrAncestor(user.id, project.design_owner_department_id)) return true;
+
+  const tasks = db
+    .prepare('SELECT assignee_id, team_id, owner_department_id FROM case_task WHERE project_case_id = ?')
+    .all(projectCaseId) as Array<{ assignee_id: string | null; team_id: string | null; owner_department_id: string | null }>;
+  for (const task of tasks) {
+    if (task.assignee_id === user.id) return true;
+    if (task.owner_department_id && canLeadDepartmentOrAncestor(user.id, task.owner_department_id)) return true;
+    if (task.team_id) {
+      const team = db.prepare('SELECT 1 FROM team WHERE id = ? AND leader_id = ?').get(task.team_id, user.id);
+      if (team) return true;
+    }
+  }
+  return false;
+}
+
+function canLeadDepartmentOrAncestor(userId: string, departmentId: string) {
+  return getDepartmentLeaderUserIds(departmentId).includes(userId);
+}
+
+function getDepartmentLeaderUserIds(departmentId: string | null | undefined) {
+  if (!departmentId) return [];
+  const ids: string[] = [];
+  const visited = new Set<string>();
+  let currentId: string | null | undefined = departmentId;
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    const department = db
+      .prepare('SELECT parent_department_id, leader_user_id FROM department WHERE id = ?')
+      .get(currentId) as { parent_department_id: string | null; leader_user_id: string | null } | undefined;
+    if (!department) break;
+    const leader = findEmployeeIdByFeishuLeaderId(department.leader_user_id);
+    if (leader && !ids.includes(leader)) ids.push(leader);
+    currentId = department.parent_department_id;
+  }
+  return ids;
+}
+
+function findEmployeeIdByFeishuLeaderId(leaderUserId: string | null | undefined) {
+  if (!leaderUserId) return null;
+  const employee = db
+    .prepare(
+      `SELECT id
+       FROM employee
+       WHERE COALESCE(is_active, 1) = 1
+         AND (id = ? OR feishu_open_id = ? OR feishu_user_id = ?)
+       LIMIT 1`
+    )
+    .get(leaderUserId, leaderUserId, leaderUserId) as { id: string } | undefined;
+  return employee?.id ?? null;
+}
+
+type OwnerLookupDepartment = {
+  id: string;
+  name: string;
+  parent_department_id: string | null;
+};
+
+type OwnerLookupEmployee = {
+  id: string;
+  name: string;
+  department_id: string | null;
+  group_department_id: string | null;
+};
+
+function buildDepartmentOwnerTreeByName(departmentName: string): OwnerLookupNode[] {
+  const context = getOwnerLookupContext();
+  const root = context.departments.find((department) => department.name === departmentName);
+  if (!root) return [];
+  return [buildDepartmentOwnerNode(root, context)];
+}
+
+function buildProductionStageOwnerTree(groupDepartmentName: string): OwnerLookupNode[] {
+  const context = getOwnerLookupContext();
+  const production = context.departments.find((department) => department.name === '生产部');
+  const group = context.departments.find((department) => department.name === groupDepartmentName);
+  const nodes: OwnerLookupNode[] = [];
+  if (production) {
+    for (const employee of context.employeesByDepartment.get(production.id) ?? []) {
+      nodes.push(buildEmployeeOwnerNode(employee));
+    }
+  }
+  if (group) nodes.push(buildDepartmentOwnerNode(group, context));
+  return dedupeOwnerLookupNodes(nodes);
+}
+
+function getOwnerLookupContext() {
+  const departments = db
+    .prepare("SELECT id, name, parent_department_id FROM department WHERE status IS NULL OR status != 'deleted' ORDER BY name")
+    .all() as OwnerLookupDepartment[];
+  const employees = db
+    .prepare(
+      `SELECT e.id, e.name, e.department_id, ed.department_id as group_department_id
+       FROM employee e
+       LEFT JOIN employee_department ed ON ed.employee_id = e.id AND COALESCE(ed.locally_removed, 0) = 0
+       WHERE COALESCE(e.is_active, 1) = 1
+       ORDER BY e.name`
+    )
+    .all() as OwnerLookupEmployee[];
+  const childrenByDepartment = new Map<string, OwnerLookupDepartment[]>();
+  for (const department of departments) {
+    if (!department.parent_department_id) continue;
+    childrenByDepartment.set(department.parent_department_id, [
+      ...(childrenByDepartment.get(department.parent_department_id) ?? []),
+      department
+    ]);
+  }
+  const employeesByDepartment = new Map<string, OwnerLookupEmployee[]>();
+  const seenMemberships = new Set<string>();
+  for (const employee of employees) {
+    const departmentIds = [employee.group_department_id, employee.department_id].filter((item): item is string => Boolean(item));
+    for (const departmentId of departmentIds) {
+      const key = `${departmentId}:${employee.id}`;
+      if (seenMemberships.has(key)) continue;
+      seenMemberships.add(key);
+      employeesByDepartment.set(departmentId, [...(employeesByDepartment.get(departmentId) ?? []), employee]);
+    }
+  }
+  return { departments, childrenByDepartment, employeesByDepartment };
+}
+
+function buildDepartmentOwnerNode(
+  department: OwnerLookupDepartment,
+  context: ReturnType<typeof getOwnerLookupContext>
+): OwnerLookupNode {
+  const children = [
+    ...(context.childrenByDepartment.get(department.id) ?? []).map((child) => buildDepartmentOwnerNode(child, context)),
+    ...(context.employeesByDepartment.get(department.id) ?? []).map((employee) => buildEmployeeOwnerNode(employee))
+  ];
+  return {
+    title: department.name,
+    value: `department:${department.id}`,
+    key: `department:${department.id}`,
+    type: 'department',
+    children: dedupeOwnerLookupNodes(children)
+  };
+}
+
+function buildEmployeeOwnerNode(employee: OwnerLookupEmployee): OwnerLookupNode {
+  return {
+    title: employee.name,
+    value: `employee:${employee.id}`,
+    key: `employee:${employee.id}`,
+    type: 'employee'
+  };
+}
+
+function dedupeOwnerLookupNodes(nodes: OwnerLookupNode[], seen = new Set<string>()) {
+  const result: OwnerLookupNode[] = [];
+  for (const node of nodes) {
+    if (seen.has(node.value)) continue;
+    seen.add(node.value);
+    result.push({
+      ...node,
+      children: node.children ? dedupeOwnerLookupNodes(node.children, seen) : undefined
+    });
+  }
+  return result;
 }
 
 export function updateProgress(targetType: TargetType, targetId: string, progress: number, user: CurrentUser, reason?: string) {
@@ -213,7 +397,9 @@ export type ProjectCaseInput = {
   category?: string | null;
   customer_name?: string | null;
   business_owner_id?: string | null;
+  business_owner_department_id?: string | null;
   design_owner_id?: string | null;
+  design_owner_department_id?: string | null;
   estimated_weight?: number | null;
   delivery_date?: string | null;
   delivery_status?: string | null;
@@ -235,6 +421,7 @@ export type ProjectCaseStageOwnerInput = {
   task_type: string;
   assignee_id?: string | null;
   team_id?: string | null;
+  department_id?: string | null;
 };
 
 export type DeliveryInfoInput = {
@@ -245,6 +432,26 @@ export type DeliveryInfoInput = {
   delivery_remark?: string | null;
 };
 
+export type OwnerLookupNode = {
+  title: string;
+  value: string;
+  key: string;
+  type: 'department' | 'employee';
+  children?: OwnerLookupNode[];
+};
+
+export function buildOwnerLookupTrees() {
+  return {
+    business: buildDepartmentOwnerTreeByName('业务部'),
+    design: buildDepartmentOwnerTreeByName('设计部'),
+    material: buildDepartmentOwnerTreeByName('采购部'),
+    cutting: buildProductionStageOwnerTree('开料组'),
+    production: buildProductionStageOwnerTree('装配组'),
+    painting: buildProductionStageOwnerTree('装配组'),
+    inspection: buildProductionStageOwnerTree('质安组')
+  };
+}
+
 export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
   assertCanManageProjects(user);
   const name = input.name?.trim();
@@ -254,7 +461,11 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
     throw err;
   }
   validateEmployee(input.business_owner_id);
+  validateDepartment(input.business_owner_department_id);
   validateEmployee(input.design_owner_id);
+  validateDepartment(input.design_owner_department_id);
+  validateSingleOwnerTarget(input.business_owner_id, input.business_owner_department_id, '业务部负责人');
+  validateSingleOwnerTarget(input.design_owner_id, input.design_owner_department_id, '设计负责人');
   validateStageOwners(input.stage_owners);
   const id = makeId('CASE');
   const maxSeq = db.prepare('SELECT COALESCE(MAX(source_seq), 0) as value FROM project_case').get() as { value: number };
@@ -265,8 +476,8 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
   const tx = db.transaction(() => {
     db.prepare(
       `INSERT INTO project_case
-       (id, code, name, category, customer_name, business_owner_id, design_owner_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, delivery_remark, associated_month, source_sheet, source_row, source_seq)
-       VALUES (@id, @code, @name, @category, @customer_name, @business_owner_id, @design_owner_id, @estimated_weight, 'T', 'in_progress', 0, @delivery_date, @delivery_status, @delivery_remark, @associated_month, 'manual', null, @source_seq)`
+       (id, code, name, category, customer_name, business_owner_id, business_owner_department_id, design_owner_id, design_owner_department_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, delivery_remark, associated_month, source_sheet, source_row, source_seq)
+       VALUES (@id, @code, @name, @category, @customer_name, @business_owner_id, @business_owner_department_id, @design_owner_id, @design_owner_department_id, @estimated_weight, 'T', 'in_progress', 0, @delivery_date, @delivery_status, @delivery_remark, @associated_month, 'manual', null, @source_seq)`
     ).run({
       id,
       code: normalizeText(input.code),
@@ -274,7 +485,9 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
       category: normalizeText(input.category),
       customer_name: normalizeText(input.customer_name),
       business_owner_id: input.business_owner_id ?? null,
+      business_owner_department_id: input.business_owner_department_id ?? null,
       design_owner_id: input.design_owner_id ?? null,
+      design_owner_department_id: input.design_owner_department_id ?? null,
       estimated_weight: input.estimated_weight ?? null,
       delivery_date: deliveryDate,
       delivery_status: deliveryStatus,
@@ -282,7 +495,7 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
       associated_month: associatedMonth,
       source_seq: Number(maxSeq.value ?? 0) + 1
     });
-    syncProjectOwnerMembers(id, input.business_owner_id ?? null, input.design_owner_id ?? null);
+    syncProjectOwnerMembers(id, input.business_owner_id ?? null, input.business_owner_department_id ?? null, input.design_owner_id ?? null, input.design_owner_department_id ?? null);
     ensureProjectTasks(id, stageOwnerInputMap(input.stage_owners), input.design_owner_id ?? null);
     syncCaseItems(id, input.items ?? [], stageOwnerInputMap(input.stage_owners));
     if (input.stage_owners) applyStageOwners(id, input.stage_owners);
@@ -297,7 +510,11 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
 export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput, user: CurrentUser) {
   assertCanManageProjects(user);
   validateEmployee(input.business_owner_id);
+  validateDepartment(input.business_owner_department_id);
   validateEmployee(input.design_owner_id);
+  validateDepartment(input.design_owner_department_id);
+  validateSingleOwnerTarget(input.business_owner_id, input.business_owner_department_id, '业务部负责人');
+  validateSingleOwnerTarget(input.design_owner_id, input.design_owner_department_id, '设计负责人');
   validateStageOwners(input.stage_owners);
   const existing = db.prepare('SELECT * FROM project_case WHERE id = ?').get(projectCaseId) as
     | (ProjectCaseInput & { id: string })
@@ -308,7 +525,15 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
     throw err;
   }
   const nextBusinessOwnerId = input.business_owner_id === undefined ? existing.business_owner_id ?? null : input.business_owner_id ?? null;
+  const nextBusinessOwnerDepartmentId = input.business_owner_department_id === undefined
+    ? existing.business_owner_department_id ?? null
+    : input.business_owner_department_id ?? null;
   const nextDesignOwnerId = input.design_owner_id === undefined ? existing.design_owner_id ?? null : input.design_owner_id ?? null;
+  const nextDesignOwnerDepartmentId = input.design_owner_department_id === undefined
+    ? existing.design_owner_department_id ?? null
+    : input.design_owner_department_id ?? null;
+  validateSingleOwnerTarget(nextBusinessOwnerId, nextBusinessOwnerDepartmentId, '业务部负责人');
+  validateSingleOwnerTarget(nextDesignOwnerId, nextDesignOwnerDepartmentId, '设计负责人');
   const nextDeliveryDate = normalizeText(input.delivery_date === undefined ? existing.delivery_date : input.delivery_date);
   const nextDeliveryStatus = normalizeDeliveryStatus(input.delivery_status === undefined ? existing.delivery_status : input.delivery_status);
   const nextDeliveryRemark = normalizeDeliveryRemark(
@@ -327,7 +552,9 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
            category = @category,
            customer_name = @customer_name,
            business_owner_id = @business_owner_id,
+           business_owner_department_id = @business_owner_department_id,
            design_owner_id = @design_owner_id,
+           design_owner_department_id = @design_owner_department_id,
            estimated_weight = @estimated_weight,
            delivery_date = @delivery_date,
            delivery_status = @delivery_status,
@@ -341,14 +568,16 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
       category: normalizeText(input.category === undefined ? existing.category : input.category),
       customer_name: normalizeText(input.customer_name === undefined ? existing.customer_name : input.customer_name),
       business_owner_id: nextBusinessOwnerId,
+      business_owner_department_id: nextBusinessOwnerDepartmentId,
       design_owner_id: nextDesignOwnerId,
+      design_owner_department_id: nextDesignOwnerDepartmentId,
       estimated_weight: input.estimated_weight === undefined ? existing.estimated_weight ?? null : input.estimated_weight ?? null,
       delivery_date: nextDeliveryDate,
       delivery_status: nextDeliveryStatus,
       delivery_remark: nextDeliveryRemark,
       associated_month: nextAssociatedMonth
     });
-    syncProjectOwnerMembers(projectCaseId, nextBusinessOwnerId, nextDesignOwnerId);
+    syncProjectOwnerMembers(projectCaseId, nextBusinessOwnerId, nextBusinessOwnerDepartmentId, nextDesignOwnerId, nextDesignOwnerDepartmentId);
     ensureProjectTasks(projectCaseId, stageOwnerInputMap(input.stage_owners), nextDesignOwnerId);
     syncCaseItems(projectCaseId, input.items, input.stage_owners ? stageOwnerInputMap(input.stage_owners) : getCurrentStageOwnerMap(projectCaseId));
     if (input.stage_owners) {
@@ -437,10 +666,12 @@ export function updateDeliveryInfo(input: DeliveryInfoInput, user: CurrentUser) 
 export function getProjectCaseManageProfile(projectCaseId: string, user: CurrentUser) {
   assertCanManageProjects(user);
   const project = db.prepare(
-    `SELECT pc.*, b.name as business_owner_name, d.name as design_owner_name
+    `SELECT pc.*, COALESCE(b.name, bd.name) as business_owner_name, COALESCE(d.name, dd.name) as design_owner_name
      FROM project_case pc
      LEFT JOIN employee b ON b.id = pc.business_owner_id
+     LEFT JOIN department bd ON bd.id = pc.business_owner_department_id
      LEFT JOIN employee d ON d.id = pc.design_owner_id
+     LEFT JOIN department dd ON dd.id = pc.design_owner_department_id
      WHERE pc.id = ?`
   ).get(projectCaseId) as (Record<string, unknown> & { id: string }) | undefined;
   if (!project) {
@@ -475,10 +706,12 @@ function getProjectStageOwners(projectCaseId: string) {
       owner_department_name: string | null;
     }>;
   const ownerRows = db.prepare(
-    `SELECT DISTINCT t.assignee_id, e.name as assignee_name, t.team_id, tm.name as team_name
+    `SELECT DISTINCT t.assignee_id, e.name as assignee_name, t.team_id, tm.name as team_name,
+            t.owner_department_id as department_id, od.name as department_name
      FROM case_task t
      LEFT JOIN employee e ON e.id = t.assignee_id
      LEFT JOIN team tm ON tm.id = t.team_id
+     LEFT JOIN department od ON od.id = t.owner_department_id
      WHERE t.project_case_id = ?
        AND t.task_type = ?`
   );
@@ -489,10 +722,12 @@ function getProjectStageOwners(projectCaseId: string) {
       assignee_name: string | null;
       team_id: string | null;
       team_name: string | null;
+      department_id: string | null;
+      department_name: string | null;
     }>;
     const uniqueOwners = new Map<string, typeof owners[number]>();
     for (const owner of owners) {
-      uniqueOwners.set(`${owner.assignee_id ?? ''}:${owner.team_id ?? ''}`, owner);
+      uniqueOwners.set(`${owner.assignee_id ?? ''}:${owner.team_id ?? ''}:${owner.department_id ?? ''}`, owner);
     }
     const ownerList = Array.from(uniqueOwners.values());
     const mixed = ownerList.length > 1;
@@ -507,15 +742,29 @@ function getProjectStageOwners(projectCaseId: string) {
       assignee_name: owner?.assignee_name ?? null,
       team_id: owner?.team_id ?? null,
       team_name: owner?.team_name ?? null,
+      department_id: owner?.assignee_id || owner?.team_id ? null : owner?.department_id ?? null,
+      department_name: owner?.assignee_id || owner?.team_id ? null : owner?.department_name ?? null,
       mixed
     };
   });
 }
 
-function syncProjectOwnerMembers(projectCaseId: string, businessOwnerId: string | null, designOwnerId: string | null) {
+function syncProjectOwnerMembers(
+  projectCaseId: string,
+  businessOwnerId: string | null,
+  businessOwnerDepartmentId: string | null,
+  designOwnerId: string | null,
+  designOwnerDepartmentId: string | null
+) {
   db.prepare("DELETE FROM project_case_member WHERE project_case_id = ? AND role_in_case IN ('business_owner', 'design_owner')").run(projectCaseId);
   if (businessOwnerId) insertProjectMember(projectCaseId, businessOwnerId, 'business_owner');
+  for (const leaderId of getDepartmentLeaderUserIds(businessOwnerDepartmentId)) {
+    insertProjectMember(projectCaseId, leaderId, 'business_owner');
+  }
   if (designOwnerId) insertProjectMember(projectCaseId, designOwnerId, 'design_owner');
+  for (const leaderId of getDepartmentLeaderUserIds(designOwnerDepartmentId)) {
+    insertProjectMember(projectCaseId, leaderId, 'design_owner');
+  }
 }
 
 function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | undefined, stageOwners: Map<string, StageOwnerValue>) {
@@ -646,6 +895,7 @@ function deleteCaseItem(projectCaseId: string, itemId: string) {
 type StageOwnerValue = {
   assignee_id: string | null;
   team_id: string | null;
+  department_id: string | null;
 };
 
 function stageOwnerInputMap(stageOwners: ProjectCaseStageOwnerInput[] | undefined) {
@@ -653,7 +903,8 @@ function stageOwnerInputMap(stageOwners: ProjectCaseStageOwnerInput[] | undefine
   for (const owner of stageOwners ?? []) {
     map.set(owner.task_type, {
       assignee_id: owner.assignee_id ?? null,
-      team_id: owner.team_id ?? null
+      team_id: owner.team_id ?? null,
+      department_id: owner.department_id ?? null
     });
   }
   return map;
@@ -665,7 +916,8 @@ function getCurrentStageOwnerMap(projectCaseId: string) {
     if (stage.mixed) continue;
     map.set(stage.task_type, {
       assignee_id: stage.assignee_id,
-      team_id: stage.team_id
+      team_id: stage.team_id,
+      department_id: stage.department_id
     });
   }
   return map;
@@ -677,8 +929,8 @@ function ensureProjectTasks(projectCaseId: string, stageOwners: Map<string, Stag
     .all() as Array<TaskTemplateRow>;
   for (const template of caseTemplates) {
     const fallbackOwner = template.task_type === 'design'
-      ? { assignee_id: fallbackDesignOwnerId, team_id: null }
-      : { assignee_id: null, team_id: null };
+      ? { assignee_id: fallbackDesignOwnerId, team_id: null, department_id: null }
+      : { assignee_id: null, team_id: null, department_id: null };
     ensureTaskWithSubtasks(projectCaseId, null, template, stageOwners.get(template.task_type) ?? fallbackOwner);
   }
 
@@ -698,7 +950,7 @@ function ensureItemTasks(projectCaseId: string, itemId: string, stageOwners: Map
     .prepare("SELECT * FROM task_template WHERE generation_scope = 'item' ORDER BY sort_order")
     .all() as Array<TaskTemplateRow>;
   for (const template of itemTemplates) {
-    ensureTaskWithSubtasks(projectCaseId, itemId, template, stageOwners.get(template.task_type) ?? { assignee_id: null, team_id: null });
+    ensureTaskWithSubtasks(projectCaseId, itemId, template, stageOwners.get(template.task_type) ?? { assignee_id: null, team_id: null, department_id: null });
   }
 }
 
@@ -719,7 +971,7 @@ function ensureTaskWithSubtasks(projectCaseId: string, itemId: string | null, te
       template.id,
       template.name,
       template.task_type,
-      template.default_owner_department_id,
+      owner.department_id,
       owner.assignee_id,
       owner.team_id
     );
@@ -748,10 +1000,10 @@ function applyStageOwners(projectCaseId: string, stageOwners: ProjectCaseStageOw
   for (const owner of stageOwners) {
     db.prepare(
       `UPDATE case_task
-       SET assignee_id = ?, team_id = ?
+       SET assignee_id = ?, team_id = ?, owner_department_id = ?
        WHERE project_case_id = ?
          AND task_type = ?`
-    ).run(owner.assignee_id ?? null, owner.team_id ?? null, projectCaseId, owner.task_type);
+    ).run(owner.assignee_id ?? null, owner.team_id ?? null, owner.department_id ?? null, projectCaseId, owner.task_type);
     db.prepare(
       `UPDATE case_subtask
        SET assignee_id = ?, team_id = ?
@@ -763,7 +1015,8 @@ function applyStageOwners(projectCaseId: string, stageOwners: ProjectCaseStageOw
     ).run(owner.assignee_id ?? null, owner.team_id ?? null, projectCaseId, owner.task_type);
 
     if (owner.task_type === 'design') {
-      db.prepare('UPDATE project_case SET design_owner_id = ? WHERE id = ?').run(owner.assignee_id ?? null, projectCaseId);
+      db.prepare('UPDATE project_case SET design_owner_id = ?, design_owner_department_id = ? WHERE id = ?')
+        .run(owner.assignee_id ?? null, owner.department_id ?? null, projectCaseId);
     }
   }
   syncTaskOwnerMembers(projectCaseId);
@@ -772,14 +1025,17 @@ function applyStageOwners(projectCaseId: string, stageOwners: ProjectCaseStageOw
 function syncTaskOwnerMembers(projectCaseId: string) {
   db.prepare("DELETE FROM project_case_member WHERE project_case_id = ? AND source IN ('task', 'stage_owner')").run(projectCaseId);
   const owners = db.prepare(
-    `SELECT DISTINCT t.task_type, t.assignee_id, tm.leader_id as team_leader_id
+    `SELECT DISTINCT t.task_type, t.assignee_id, t.owner_department_id, tm.leader_id as team_leader_id
      FROM case_task t
      LEFT JOIN team tm ON tm.id = t.team_id
      WHERE t.project_case_id = ?`
-  ).all(projectCaseId) as Array<{ task_type: string; assignee_id: string | null; team_leader_id: string | null }>;
+  ).all(projectCaseId) as Array<{ task_type: string; assignee_id: string | null; owner_department_id: string | null; team_leader_id: string | null }>;
   for (const owner of owners) {
     if (owner.assignee_id) insertProjectMember(projectCaseId, owner.assignee_id, `${owner.task_type}_owner`, 'stage_owner');
     if (owner.team_leader_id) insertProjectMember(projectCaseId, owner.team_leader_id, `${owner.task_type}_team_leader`, 'stage_owner');
+    for (const leaderId of getDepartmentLeaderUserIds(owner.owner_department_id)) {
+      insertProjectMember(projectCaseId, leaderId, `${owner.task_type}_department_leader`, 'stage_owner');
+    }
   }
 }
 
@@ -834,6 +1090,24 @@ function validateTeam(teamId: string | null | undefined) {
   }
 }
 
+function validateDepartment(departmentId: string | null | undefined) {
+  if (!departmentId) return;
+  const department = db.prepare("SELECT 1 FROM department WHERE id = ? AND (status IS NULL OR status != 'deleted')").get(departmentId);
+  if (!department) {
+    const err = new Error('负责人部门不存在');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+}
+
+function validateSingleOwnerTarget(employeeId: string | null | undefined, departmentId: string | null | undefined, label: string) {
+  if (employeeId && departmentId) {
+    const err = new Error(`${label}只能选择一个人员或部门`);
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+}
+
 function validateStageOwners(stageOwners: ProjectCaseStageOwnerInput[] | undefined) {
   if (!stageOwners) return;
   const taskTypes = new Set(
@@ -845,13 +1119,15 @@ function validateStageOwners(stageOwners: ProjectCaseStageOwnerInput[] | undefin
       err.name = 'VALIDATION_ERROR';
       throw err;
     }
-    if (owner.assignee_id && owner.team_id) {
-      const err = new Error('同一阶段只能选择一个人员或班组负责人');
+    const selectedCount = [owner.assignee_id, owner.team_id, owner.department_id].filter(Boolean).length;
+    if (selectedCount > 1) {
+      const err = new Error('同一阶段只能选择一个人员、部门或班组负责人');
       err.name = 'VALIDATION_ERROR';
       throw err;
     }
     validateEmployee(owner.assignee_id);
     validateTeam(owner.team_id);
+    validateDepartment(owner.department_id);
   }
 }
 
@@ -1125,22 +1401,21 @@ export function getAllMatrix(user: CurrentUser) {
 }
 
 function getVisibleMatrixProjects(user: CurrentUser) {
-  const sql = `SELECT pc.*, b.name as business_owner_name, de.name as design_owner_name,
+  const sql = `SELECT pc.*,
+                      COALESCE(b.name, bd.name) as business_owner_name,
+                      COALESCE(de.name, dd.name) as design_owner_name,
                       (SELECT COUNT(*) FROM exception_record ex
                        WHERE ex.project_case_id = pc.id
                          AND ex.status NOT IN ('resolved', 'closed', 'cancelled')) as open_exception_count
                FROM project_case pc
                LEFT JOIN employee b ON b.id = pc.business_owner_id
+               LEFT JOIN department bd ON bd.id = pc.business_owner_department_id
                LEFT JOIN employee de ON de.id = pc.design_owner_id
-               ${canManageProjects(user) ? '' : `WHERE EXISTS (
-                 SELECT 1 FROM project_case_member m
-                 WHERE m.project_case_id = pc.id
-                   AND m.user_id = ?
-               )`}
+               LEFT JOIN department dd ON dd.id = pc.design_owner_department_id
                ORDER BY pc.associated_month DESC, pc.source_seq, pc.id`;
-  return (canManageProjects(user)
-    ? db.prepare(sql).all()
-    : db.prepare(sql).all(user.id)) as MatrixProject[];
+  const projects = db.prepare(sql).all() as MatrixProject[];
+  if (canManageProjects(user)) return projects;
+  return projects.filter((project) => canAccessCaseByOwner(user, project.id));
 }
 
 function groupMatrixRowsByMonth(projectRows: MatrixRow[]) {
@@ -1410,10 +1685,12 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
   assertCanReadCase(user, projectCaseId);
   const projectCase = db
     .prepare(
-      `SELECT pc.*, b.name as business_owner_name, de.name as design_owner_name
+      `SELECT pc.*, COALESCE(b.name, bd.name) as business_owner_name, COALESCE(de.name, dd.name) as design_owner_name
        FROM project_case pc
        LEFT JOIN employee b ON b.id = pc.business_owner_id
+       LEFT JOIN department bd ON bd.id = pc.business_owner_department_id
        LEFT JOIN employee de ON de.id = pc.design_owner_id
+       LEFT JOIN department dd ON dd.id = pc.design_owner_department_id
        WHERE pc.id = ?`
     )
     .get(projectCaseId) as {

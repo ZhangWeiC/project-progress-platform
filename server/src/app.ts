@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { db, initializeDatabase, makeId, nowIso } from './db.js';
 import {
   assertCanReadCase,
+  buildOwnerLookupTrees,
   canManageProjects,
   createProductionPlanItem,
   createProjectCase,
@@ -112,20 +113,24 @@ app.get('/api/cases', async (request) => {
   const user = getCurrentUser(request.headers);
   if (canManageProjects(user)) {
     return db.prepare(
-      `SELECT pc.*, b.name as business_owner_name, d.name as design_owner_name,
+      `SELECT pc.*, COALESCE(b.name, bd.name) as business_owner_name, COALESCE(d.name, dd.name) as design_owner_name,
               (SELECT COUNT(*) FROM exception_record ex WHERE ex.project_case_id = pc.id AND ex.status NOT IN ('resolved', 'closed', 'cancelled')) as open_exception_count
        FROM project_case pc
        LEFT JOIN employee b ON b.id = pc.business_owner_id
+       LEFT JOIN department bd ON bd.id = pc.business_owner_department_id
        LEFT JOIN employee d ON d.id = pc.design_owner_id
+       LEFT JOIN department dd ON dd.id = pc.design_owner_department_id
        ORDER BY pc.associated_month DESC, pc.source_seq`
     ).all();
   }
   return db.prepare(
-    `SELECT pc.*, b.name as business_owner_name, d.name as design_owner_name,
+    `SELECT pc.*, COALESCE(b.name, bd.name) as business_owner_name, COALESCE(d.name, dd.name) as design_owner_name,
             (SELECT COUNT(*) FROM exception_record ex WHERE ex.project_case_id = pc.id AND ex.status NOT IN ('resolved', 'closed', 'cancelled')) as open_exception_count
      FROM project_case pc
      LEFT JOIN employee b ON b.id = pc.business_owner_id
+     LEFT JOIN department bd ON bd.id = pc.business_owner_department_id
      LEFT JOIN employee d ON d.id = pc.design_owner_id
+     LEFT JOIN department dd ON dd.id = pc.design_owner_department_id
      WHERE EXISTS (
        SELECT 1 FROM project_case_member m
        WHERE m.project_case_id = pc.id
@@ -145,14 +150,17 @@ const projectCaseItemBody = z.object({
 const projectCaseStageOwnerBody = z.object({
   task_type: z.string().trim().min(1),
   assignee_id: z.string().nullable().optional(),
-  team_id: z.string().nullable().optional()
+  team_id: z.string().nullable().optional(),
+  department_id: z.string().nullable().optional()
 });
 const projectCaseFields = {
   code: z.string().trim().nullable().optional(),
   category: z.string().trim().nullable().optional(),
   customer_name: z.string().trim().nullable().optional(),
   business_owner_id: z.string().nullable().optional(),
+  business_owner_department_id: z.string().nullable().optional(),
   design_owner_id: z.string().nullable().optional(),
+  design_owner_department_id: z.string().nullable().optional(),
   estimated_weight: z.number().nullable().optional(),
   delivery_date: z.string().trim().nullable().optional(),
   delivery_status: z.string().trim().nullable().optional(),
@@ -218,10 +226,12 @@ app.get('/api/cases/:id', async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   assertCanReadCase(user, id);
   const projectCase = db.prepare(
-    `SELECT pc.*, b.name as business_owner_name, d.name as design_owner_name
+    `SELECT pc.*, COALESCE(b.name, bd.name) as business_owner_name, COALESCE(d.name, dd.name) as design_owner_name
      FROM project_case pc
      LEFT JOIN employee b ON b.id = pc.business_owner_id
+     LEFT JOIN department bd ON bd.id = pc.business_owner_department_id
      LEFT JOIN employee d ON d.id = pc.design_owner_id
+     LEFT JOIN department dd ON dd.id = pc.design_owner_department_id
      WHERE pc.id = ?`
   ).get(id);
   if (!projectCase) {
@@ -592,7 +602,8 @@ app.get('/api/lookups', async () => {
   return {
     employees: db.prepare('SELECT * FROM employee WHERE COALESCE(is_active, 1) = 1 ORDER BY name').all(),
     departments: db.prepare("SELECT * FROM department WHERE status IS NULL OR status != 'deleted' ORDER BY name").all(),
-    teams: db.prepare('SELECT * FROM team ORDER BY name').all()
+    teams: db.prepare('SELECT * FROM team ORDER BY name').all(),
+    owner_trees: buildOwnerLookupTrees()
   };
 });
 

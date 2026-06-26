@@ -53,7 +53,9 @@ export type ProjectCase = {
   category?: string | null;
   customer_name?: string | null;
   business_owner_id?: string | null;
+  business_owner_department_id?: string | null;
   design_owner_id?: string | null;
+  design_owner_department_id?: string | null;
   estimated_weight?: number | null;
   associated_month?: string | null;
   status: string;
@@ -89,6 +91,8 @@ export type ProjectStageOwner = {
   assignee_name?: string | null;
   team_id?: string | null;
   team_name?: string | null;
+  department_id?: string | null;
+  department_name?: string | null;
   mixed?: boolean;
 };
 
@@ -211,6 +215,15 @@ export type LookupResponse = {
   employees: Array<{ id: string; name: string; role: string; permission_level?: string; department_id?: string }>;
   departments: Array<{ id: string; name: string }>;
   teams: Array<{ id: string; name: string; leader_id?: string }>;
+  owner_trees?: Record<string, OwnerLookupNode[]>;
+};
+
+export type OwnerLookupNode = {
+  title: string;
+  value: string;
+  key: string;
+  type: 'department' | 'employee';
+  children?: OwnerLookupNode[];
 };
 
 export type WorkbenchTask = CaseTask & {

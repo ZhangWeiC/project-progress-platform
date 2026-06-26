@@ -106,7 +106,9 @@ export function initializeDatabase() {
       category TEXT,
       customer_name TEXT,
       business_owner_id TEXT,
+      business_owner_department_id TEXT,
       design_owner_id TEXT,
+      design_owner_department_id TEXT,
       estimated_weight REAL,
       weight_unit TEXT DEFAULT 'T',
       status TEXT NOT NULL DEFAULT 'in_progress',
@@ -119,7 +121,9 @@ export function initializeDatabase() {
       source_row INTEGER,
       source_seq INTEGER,
       FOREIGN KEY (business_owner_id) REFERENCES employee(id),
-      FOREIGN KEY (design_owner_id) REFERENCES employee(id)
+      FOREIGN KEY (business_owner_department_id) REFERENCES department(id),
+      FOREIGN KEY (design_owner_id) REFERENCES employee(id),
+      FOREIGN KEY (design_owner_department_id) REFERENCES department(id)
     );
 
     CREATE TABLE IF NOT EXISTS case_item (
@@ -491,6 +495,8 @@ function migrateFeishuIdentityColumns() {
   addColumnIfMissing('employee', 'locally_disabled', 'INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing('employee', 'last_feishu_sync_at', 'TEXT');
   addColumnIfMissing('employee_department', 'locally_removed', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('project_case', 'business_owner_department_id', 'TEXT');
+  addColumnIfMissing('project_case', 'design_owner_department_id', 'TEXT');
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_employee_feishu_open_id ON employee(feishu_open_id);
