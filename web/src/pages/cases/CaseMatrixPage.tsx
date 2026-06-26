@@ -1,4 +1,4 @@
-import { CompressOutlined, DeleteOutlined, EditOutlined, ExpandAltOutlined, MinusOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
+import { CompressOutlined, DeleteOutlined, ExpandAltOutlined, MinusOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { Button, Card, Divider, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, TreeSelect, Typography, message } from 'antd';
 import type { TableProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Key, MouseEvent } from 'react';
 import { TaskDrawer } from '../../components/drawers/TaskDrawer';
 import { ProgressCell } from '../../components/matrix/ProgressCell';
-import { createProjectCase, deleteProjectCase, fetchAllMatrix, fetchCases, fetchLookups, fetchProjectCaseManageProfile, updateDeliveryInfo, updateProjectCase } from '../../services/cases';
+import { createProjectCase, deleteProjectCase, fetchAllMatrix, fetchLookups, fetchProjectCaseManageProfile, updateDeliveryInfo, updateProjectCase } from '../../services/cases';
 import type { ProjectCasePayload } from '../../services/cases';
 import { getAuthSession } from '../../services/auth';
 import type { LookupResponse, MatrixCell, MatrixColumn, MatrixRow, ProjectCase, ProjectStageOwner } from '../../types';
@@ -58,7 +58,6 @@ export function CaseMatrixPage() {
   const [expandedRowKeys, setExpandedRowKeys] = useState<Key[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<string>();
-  const [projectManagementOpen, setProjectManagementOpen] = useState(false);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectCase | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -70,12 +69,12 @@ export function CaseMatrixPage() {
     currentUser?.role === 'business_owner' ||
     currentUser?.permission_level === 'manager'
   );
+  const canManageProjectBasics = currentUser?.role === 'admin';
 
   const matrixQuery = useQuery({
     queryKey: ['matrix', 'all'],
     queryFn: fetchAllMatrix
   });
-  const casesQuery = useQuery({ queryKey: ['cases'], queryFn: fetchCases, enabled: canManageProjects });
   const lookupsQuery = useQuery({ queryKey: ['lookups'], queryFn: fetchLookups, enabled: canManageProjects });
 
   const rows = matrixQuery.data?.rows ?? [];
@@ -135,18 +134,14 @@ export function CaseMatrixPage() {
   });
 
   const openCreateProject = () => {
-    setProjectManagementOpen(false);
+    if (!canManageProjectBasics) return;
     setEditingProject(null);
     form.resetFields();
     form.setFieldsValue({ associated_month: currentMonth(), items: [{ name: '', delivery_date: null, delivery_status: null, delivery_remark: null }] });
     setProjectModalOpen(true);
   };
-  const openProjectManagement = () => {
-    setProjectManagementOpen(true);
-    void casesQuery.refetch();
-  };
   const openEditProject = async (projectCaseId: string) => {
-    setProjectManagementOpen(false);
+    if (!canManageProjectBasics) return;
     setProfileLoading(true);
     try {
       const project = await fetchProjectCaseManageProfile(projectCaseId);
@@ -193,8 +188,8 @@ export function CaseMatrixPage() {
   };
 
   const tableColumns = useMemo(
-    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjects, openDeliveryEditor, openEditProject, deliveryStatusFilter),
-    [matrixQuery.data?.columns, canManageProjects, deliveryStatusFilter]
+    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjects, canManageProjectBasics, openDeliveryEditor, openEditProject, deliveryStatusFilter),
+    [matrixQuery.data?.columns, canManageProjects, canManageProjectBasics, deliveryStatusFilter]
   );
   const handleTableChange: TableProps<MatrixRow>['onChange'] = (_pagination, filters) => {
     const next = Array.isArray(filters.delivery_status) ? filters.delivery_status[0] : undefined;
@@ -233,9 +228,9 @@ export function CaseMatrixPage() {
             <Button icon={<ReloadOutlined />} onClick={() => matrixQuery.refetch()}>
               刷新
             </Button>
-            {canManageProjects && (
-              <Button type="primary" icon={<SettingOutlined />} onClick={openProjectManagement}>
-                项目管理
+            {canManageProjectBasics && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={openCreateProject}>
+                新增项目
               </Button>
             )}
           </Space>
@@ -262,9 +257,11 @@ export function CaseMatrixPage() {
             expandIcon: (props) => (
               <MatrixExpandIcon
                 {...props}
-                canManageProjects={canManageProjects}
+                canManageProjectBasics={canManageProjectBasics}
                 deleteLoading={deleteMutation.isPending}
-                onDelete={(row) => deleteMutation.mutate(row.project_case_id)}
+                onDelete={(row) => {
+                  if (canManageProjectBasics) deleteMutation.mutate(row.project_case_id);
+                }}
               />
             )
           }}
@@ -313,16 +310,6 @@ export function CaseMatrixPage() {
           )}
         </Form>
       </Modal>
-      <ProjectManagementModal
-        open={projectManagementOpen}
-        projects={casesQuery.data ?? []}
-        loading={casesQuery.isLoading || casesQuery.isFetching}
-        deleteLoading={deleteMutation.isPending}
-        onCancel={() => setProjectManagementOpen(false)}
-        onCreate={openCreateProject}
-        onEdit={(project) => openEditProject(project.id)}
-        onDelete={(project) => deleteMutation.mutate(project.id)}
-      />
       <ProjectCaseModal
         open={projectModalOpen}
         editingProject={editingProject}
@@ -345,7 +332,7 @@ type MatrixExpandIconProps = {
   expanded: boolean;
   record: MatrixRow;
   onExpand: (record: MatrixRow, event: MouseEvent<HTMLElement>) => void;
-  canManageProjects: boolean;
+  canManageProjectBasics: boolean;
   deleteLoading: boolean;
   onDelete: (row: MatrixRow) => void;
 };
@@ -354,7 +341,7 @@ function MatrixExpandIcon({
   expanded,
   record,
   onExpand,
-  canManageProjects,
+  canManageProjectBasics,
   deleteLoading,
   onDelete
 }: MatrixExpandIconProps) {
@@ -381,7 +368,7 @@ function MatrixExpandIcon({
       ) : (
         <span className="matrix-row-action-placeholder" />
       )}
-      {canManageProjects && (
+      {canManageProjectBasics && (
         <Popconfirm
           title="删除项目"
           description={`确认删除「${projectName}」？会同时删除子项目、任务、日报和异常。`}
@@ -410,6 +397,7 @@ function buildColumns(
   columns: MatrixColumn[],
   openTask: (taskId: string) => void,
   canManageProjects: boolean,
+  canManageProjectBasics: boolean,
   onEditDelivery: (row: MatrixRow) => void,
   onEditProject: (projectCaseId: string) => void,
   deliveryStatusFilter?: string
@@ -423,7 +411,7 @@ function buildColumns(
       fixed: 'left' as const,
       width: column.key === 'project_item_name' ? 380 : column.key === 'case_name' ? 250 : 190,
       className: `matrix-fixed-left matrix-column-${column.key}`,
-      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row, { canManageProjects, onEditProject })
+      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row, { canManageProjectBasics, onEditProject })
     }));
 
   const rightColumns = columns
@@ -435,7 +423,7 @@ function buildColumns(
       fixed: 'right' as const,
       width: 70,
       className: 'matrix-fixed-right',
-      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row, { canManageProjects, onEditProject })
+      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row, { canManageProjectBasics, onEditProject })
     }));
 
   const groups = new Map<string, MatrixColumn[]>();
@@ -495,7 +483,7 @@ function matrixColumnWidth(column: MatrixColumn) {
 function renderPinnedCell(
   key: string,
   row: MatrixRow,
-  context: { canManageProjects: boolean; onEditProject: (projectCaseId: string) => void }
+  context: { canManageProjectBasics: boolean; onEditProject: (projectCaseId: string) => void }
 ) {
   const cell = row.cells[key];
   const value = cell?.value;
@@ -524,7 +512,7 @@ function renderPinnedCell(
       <Space direction="vertical" size={0} className="matrix-row-title">
         <div className="matrix-project-title-line">
           {shipped && <Tag color="success" className="matrix-shipped-tag">已发货</Tag>}
-          {row.row_type === 'project' && context.canManageProjects ? (
+          {row.row_type === 'project' && context.canManageProjectBasics ? (
             <ProjectTitleButton text={text} onClick={() => context.onEditProject(row.project_case_id)} />
           ) : (
             <EllipsisText text={text} strong={row.row_type === 'project'} />
@@ -542,7 +530,7 @@ function renderPinnedCell(
     return (
       <Space direction="vertical" size={0} className="matrix-row-title">
         <div className="matrix-project-title-line">
-          {row.row_type === 'project' && context.canManageProjects ? (
+          {row.row_type === 'project' && context.canManageProjectBasics ? (
             <ProjectTitleButton text={text} onClick={() => context.onEditProject(row.project_case_id)} />
           ) : (
             <EllipsisText text={text} strong={row.row_type === 'project'} />
@@ -685,109 +673,6 @@ function rowMatches(row: MatrixRow, keyword: string) {
 function rowMatchesDeliveryStatus(row: MatrixRow, deliveryStatus?: string) {
   if (!deliveryStatus) return true;
   return stringCellValue(row.cells.delivery_status) === deliveryStatus;
-}
-
-type ProjectManagementModalProps = {
-  open: boolean;
-  projects: ProjectCase[];
-  loading: boolean;
-  deleteLoading: boolean;
-  onCancel: () => void;
-  onCreate: () => void;
-  onEdit: (project: ProjectCase) => void;
-  onDelete: (project: ProjectCase) => void;
-};
-
-function ProjectManagementModal({
-  open,
-  projects,
-  loading,
-  deleteLoading,
-  onCancel,
-  onCreate,
-  onEdit,
-  onDelete
-}: ProjectManagementModalProps) {
-  const columns: ColumnsType<ProjectCase> = [
-    {
-      title: '项目名称',
-      dataIndex: 'name',
-      key: 'name',
-      render: (value: string) => <EllipsisText text={value || '-'} strong />
-    },
-    {
-      title: '关联年月',
-      dataIndex: 'associated_month',
-      key: 'associated_month',
-      width: 96,
-      render: (value: string | null) => value || '-'
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 132,
-      align: 'right',
-      render: (_value, project) => (
-        <Space size={4}>
-          <Tooltip title="编辑基础信息">
-            <Button
-              size="small"
-              type="text"
-              icon={<EditOutlined />}
-              aria-label="编辑基础信息"
-              onClick={() => onEdit(project)}
-            />
-          </Tooltip>
-          <Popconfirm
-            title="删除项目"
-            description="会同时删除项目下的子项目、任务、日报和异常，确认删除？"
-            okText="删除"
-            cancelText="取消"
-            okButtonProps={{ danger: true, loading: deleteLoading }}
-            onConfirm={() => onDelete(project)}
-          >
-            <Button
-              size="small"
-              type="text"
-              danger
-              icon={<DeleteOutlined />}
-              aria-label="删除项目"
-            />
-          </Popconfirm>
-        </Space>
-      )
-    }
-  ];
-
-  return (
-    <Modal
-      title="项目管理"
-      open={open}
-      onCancel={onCancel}
-      footer={null}
-      width={720}
-      destroyOnClose
-    >
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <div className="project-management-toolbar">
-          <Typography.Text type="secondary">{projects.length} 个项目</Typography.Text>
-          <Button type="primary" icon={<PlusOutlined />} onClick={onCreate}>
-            新增项目
-          </Button>
-        </div>
-        <Table<ProjectCase>
-          rowKey="id"
-          loading={loading}
-          columns={columns}
-          dataSource={projects}
-          pagination={false}
-          size="small"
-          scroll={{ y: 520 }}
-          className="project-management-table"
-        />
-      </Space>
-    </Modal>
-  );
 }
 
 type ProjectCaseModalProps = {
