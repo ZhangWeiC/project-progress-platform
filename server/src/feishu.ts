@@ -93,6 +93,8 @@ type ContactDepartmentRow = {
   name: string;
   parent_department_id: string | null;
   feishu_open_department_id: string | null;
+  leader_user_id: string | null;
+  leader_name: string | null;
   status: string | null;
   employee_count: number;
   employees: ContactEmployeeRow[];
@@ -135,11 +137,14 @@ export function getFeishuStatus() {
 
 export function getFeishuContactsByDepartment() {
   const departments = db.prepare(
-    `SELECT d.id, d.name, d.parent_department_id, d.feishu_open_department_id, d.status,
-            COUNT(e.id) as employee_count
+    `SELECT d.id, d.name, d.parent_department_id, d.feishu_open_department_id, d.leader_user_id,
+            leader.name as leader_name, d.status, COUNT(e.id) as employee_count
      FROM department d
-     LEFT JOIN employee_department ed ON ed.department_id = d.id
+     LEFT JOIN employee_department ed ON ed.department_id = d.id AND COALESCE(ed.locally_removed, 0) = 0
      LEFT JOIN employee e ON e.id = ed.employee_id AND COALESCE(e.is_active, 1) = 1
+     LEFT JOIN employee leader
+       ON COALESCE(leader.is_active, 1) = 1
+      AND (leader.feishu_open_id = d.leader_user_id OR leader.feishu_user_id = d.leader_user_id)
      WHERE d.status IS NULL OR d.status != 'deleted'
      GROUP BY d.id
      ORDER BY COALESCE(d.parent_department_id, ''), d.name`
@@ -150,7 +155,7 @@ export function getFeishuContactsByDepartment() {
             e.name_overridden, e.locally_disabled,
             ed.department_id as group_department_id, ed.is_primary
      FROM employee e
-     LEFT JOIN employee_department ed ON ed.employee_id = e.id
+     LEFT JOIN employee_department ed ON ed.employee_id = e.id AND COALESCE(ed.locally_removed, 0) = 0
      WHERE COALESCE(e.is_active, 1) = 1
      ORDER BY e.name`
   ).all() as ContactEmployeeRow[];
@@ -312,6 +317,57 @@ export function deactivateFeishuContactEmployee(employeeId: string, currentUser:
     db.prepare('UPDATE employee SET is_active = 0, locally_disabled = 1, last_feishu_sync_at = COALESCE(last_feishu_sync_at, ?) WHERE id = ?').run(disabledAt, employeeId);
     db.prepare('UPDATE user_credential SET enabled = 0 WHERE employee_id = ?').run(employeeId);
     db.prepare('DELETE FROM auth_session WHERE employee_id = ?').run(employeeId);
+  });
+  tx();
+  return { ok: true };
+}
+
+export function removeFeishuContactEmployeeFromDepartment(employeeId: string, departmentId: string, currentUser: CurrentUser) {
+  assertCanManageFeishuContacts(currentUser, '仅可管理权限可调整飞书通讯录部门');
+  const employee = db
+    .prepare('SELECT id, department_id FROM employee WHERE id = ? AND COALESCE(is_active, 1) = 1')
+    .get(employeeId) as { id: string; department_id: string | null } | undefined;
+  if (!employee) throwNotFound('人员不存在或已停用');
+
+  const department = db
+    .prepare("SELECT id FROM department WHERE id = ? AND (status IS NULL OR status != 'deleted')")
+    .get(departmentId) as { id: string } | undefined;
+  if (!department) throwNotFound('部门不存在或已删除');
+
+  const membership = db
+    .prepare('SELECT employee_id, department_id FROM employee_department WHERE employee_id = ? AND department_id = ?')
+    .get(employeeId, departmentId) as { employee_id: string; department_id: string } | undefined;
+  if (!membership && employee.department_id !== departmentId) throwNotFound('人员不在该部门中');
+
+  const removedAt = nowIso();
+  const tx = db.transaction(() => {
+    if (membership) {
+      db.prepare(
+        `UPDATE employee_department
+         SET locally_removed = 1, last_feishu_sync_at = ?
+         WHERE employee_id = ? AND department_id = ?`
+      ).run(removedAt, employeeId, departmentId);
+    } else {
+      db.prepare(
+        `INSERT OR REPLACE INTO employee_department (employee_id, department_id, is_primary, source, locally_removed, last_feishu_sync_at)
+         VALUES (?, ?, 1, 'manual', 1, ?)`
+      ).run(employeeId, departmentId, removedAt);
+    }
+
+    if (employee.department_id === departmentId) {
+      const nextDepartment = db
+        .prepare(
+          `SELECT department_id
+           FROM employee_department
+           WHERE employee_id = ?
+             AND department_id != ?
+             AND COALESCE(locally_removed, 0) = 0
+           ORDER BY is_primary DESC, department_id
+           LIMIT 1`
+        )
+        .get(employeeId, departmentId) as { department_id: string } | undefined;
+      db.prepare('UPDATE employee SET department_id = ? WHERE id = ?').run(nextDepartment?.department_id ?? null, employeeId);
+    }
   });
   tx();
   return { ok: true };
@@ -641,18 +697,27 @@ function syncEmployeeDepartments(employeeId: string, user: FeishuUser, departmen
       .filter((item): item is string => Boolean(item))
   );
   const primary = preferredDepartmentKey(user, '');
-  const deleteStmt = db.prepare("DELETE FROM employee_department WHERE employee_id = ? AND source = 'feishu'");
+  const locallyRemovedDepartmentIds = new Set(
+    (db.prepare('SELECT department_id FROM employee_department WHERE employee_id = ? AND COALESCE(locally_removed, 0) = 1').all(employeeId) as Array<{ department_id: string }>)
+      .map((row) => row.department_id)
+  );
+  const activeDepartments: Array<{ id: string; isPrimary: boolean }> = [];
+  const deleteStmt = db.prepare("DELETE FROM employee_department WHERE employee_id = ? AND source = 'feishu' AND COALESCE(locally_removed, 0) = 0");
   const insertStmt = db.prepare(
-    `INSERT OR REPLACE INTO employee_department (employee_id, department_id, is_primary, source, last_feishu_sync_at)
-     VALUES (?, ?, ?, 'feishu', ?)`
+    `INSERT OR REPLACE INTO employee_department (employee_id, department_id, is_primary, source, locally_removed, last_feishu_sync_at)
+     VALUES (?, ?, ?, 'feishu', 0, ?)`
   );
   const tx = db.transaction(() => {
     deleteStmt.run(employeeId);
     for (const key of keys) {
       const localDepartmentId = departmentIdMap.get(key);
       if (!localDepartmentId) continue;
+      if (locallyRemovedDepartmentIds.has(localDepartmentId)) continue;
       insertStmt.run(employeeId, localDepartmentId, key === primary ? 1 : 0, syncedAt);
+      activeDepartments.push({ id: localDepartmentId, isPrimary: key === primary });
     }
+    const nextDepartmentId = activeDepartments.find((department) => department.isPrimary)?.id ?? activeDepartments[0]?.id ?? null;
+    db.prepare('UPDATE employee SET department_id = ? WHERE id = ?').run(nextDepartmentId, employeeId);
   });
   tx();
 }

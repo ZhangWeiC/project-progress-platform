@@ -1,4 +1,4 @@
-import { DeleteOutlined, EditOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, MinusCircleOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Descriptions, Form, Input, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -49,6 +49,16 @@ export function SettingsPage() {
     mutationFn: (employeeId: string) => apiDelete<{ ok: boolean }>(`/api/admin/feishu/employees/${employeeId}`),
     onSuccess: () => {
       message.success('通讯录人员已删除');
+      refreshFeishuContacts();
+    },
+    onError: (error) => message.error(error.message)
+  });
+  const feishuEmployeeDepartmentRemoveMutation = useMutation({
+    mutationFn: ({ employeeId, departmentId }: { employeeId: string; departmentId: string }) => (
+      apiDelete<{ ok: boolean }>(`/api/admin/feishu/departments/${encodeURIComponent(departmentId)}/employees/${encodeURIComponent(employeeId)}`)
+    ),
+    onSuccess: () => {
+      message.success('已从当前部门移除');
       refreshFeishuContacts();
     },
     onError: (error) => message.error(error.message)
@@ -108,8 +118,10 @@ export function SettingsPage() {
                   contactsLoading={feishuContactsQuery.isLoading}
                   contactsError={feishuContactsQuery.error}
                   deletingEmployeeId={feishuEmployeeDeleteMutation.variables}
+                  removingMembershipKey={feishuEmployeeDepartmentRemoveMutation.variables ? `${feishuEmployeeDepartmentRemoveMutation.variables.departmentId}:${feishuEmployeeDepartmentRemoveMutation.variables.employeeId}` : undefined}
                   onSync={() => feishuSyncMutation.mutate()}
                   onEditEmployee={openEmployeeEditor}
+                  onRemoveEmployeeFromDepartment={(employeeId, departmentId) => feishuEmployeeDepartmentRemoveMutation.mutate({ employeeId, departmentId })}
                   onDeleteEmployee={(employeeId) => feishuEmployeeDeleteMutation.mutate(employeeId)}
                 />
               )
@@ -182,6 +194,8 @@ type FeishuContactDepartment = {
   name: string;
   parent_department_id?: string | null;
   feishu_open_department_id?: string | null;
+  leader_user_id?: string | null;
+  leader_name?: string | null;
   employee_count: number;
   employees: FeishuContactEmployee[];
   children?: FeishuContactDepartment[];
@@ -199,6 +213,8 @@ type FeishuContactTreeRow = {
   row_type: 'department' | 'employee';
   department?: FeishuContactDepartment;
   employee?: FeishuContactEmployee;
+  current_department_id?: string;
+  current_department_name?: string;
   children?: FeishuContactTreeRow[];
 };
 
@@ -217,8 +233,10 @@ function FeishuSyncPanel({
   contactsLoading,
   contactsError,
   deletingEmployeeId,
+  removingMembershipKey,
   onSync,
   onEditEmployee,
+  onRemoveEmployeeFromDepartment,
   onDeleteEmployee
 }: {
   status?: FeishuStatus;
@@ -229,8 +247,10 @@ function FeishuSyncPanel({
   contactsLoading: boolean;
   contactsError: Error | null;
   deletingEmployeeId?: string;
+  removingMembershipKey?: string;
   onSync: () => void;
   onEditEmployee: (employee: FeishuContactEmployee) => void;
+  onRemoveEmployeeFromDepartment: (employeeId: string, departmentId: string) => void;
   onDeleteEmployee: (employeeId: string) => void;
 }) {
   if (error) return <Alert type="error" message={error.message} />;
@@ -263,7 +283,9 @@ function FeishuSyncPanel({
         loading={contactsLoading}
         error={contactsError}
         deletingEmployeeId={deletingEmployeeId}
+        removingMembershipKey={removingMembershipKey}
         onEditEmployee={onEditEmployee}
+        onRemoveEmployeeFromDepartment={onRemoveEmployeeFromDepartment}
         onDeleteEmployee={onDeleteEmployee}
       />
     </Space>
@@ -275,14 +297,18 @@ function FeishuDepartmentTable({
   loading,
   error,
   deletingEmployeeId,
+  removingMembershipKey,
   onEditEmployee,
+  onRemoveEmployeeFromDepartment,
   onDeleteEmployee
 }: {
   contacts?: FeishuContactsResponse;
   loading: boolean;
   error: Error | null;
   deletingEmployeeId?: string;
+  removingMembershipKey?: string;
   onEditEmployee: (employee: FeishuContactEmployee) => void;
+  onRemoveEmployeeFromDepartment: (employeeId: string, departmentId: string) => void;
   onDeleteEmployee: (employeeId: string) => void;
 }) {
   if (error) return <Alert type="error" message={error.message} />;
@@ -308,6 +334,7 @@ function FeishuDepartmentTable({
               return (
                 <Space size={6} wrap>
                   <Typography.Text strong>{department?.name || '未命名部门'}</Typography.Text>
+                  {department?.leader_name ? <Tag color="blue">负责人：{department.leader_name}</Tag> : null}
                   {childCount > 0 ? <Tag>{childCount} 子部门</Tag> : null}
                 </Space>
               );
@@ -326,14 +353,18 @@ function FeishuDepartmentTable({
           {
             title: '操作',
             key: 'actions',
-            width: 96,
+            width: 128,
             fixed: 'right',
             align: 'right',
             render: (_value, row) => row.employee ? (
               <EmployeeActions
                 employee={row.employee}
+                departmentId={row.current_department_id}
+                departmentName={row.current_department_name}
                 deletingEmployeeId={deletingEmployeeId}
+                removingMembershipKey={removingMembershipKey}
                 onEdit={onEditEmployee}
+                onRemoveFromDepartment={onRemoveEmployeeFromDepartment}
                 onDelete={onDeleteEmployee}
               />
             ) : null
@@ -366,7 +397,9 @@ function buildFeishuDepartmentRow(department: FeishuContactDepartment): FeishuCo
       id: `${department.id}-${employee.id}`,
       name: employee.name,
       row_type: 'employee' as const,
-      employee
+      employee,
+      current_department_id: department.id,
+      current_department_name: department.name
     }))
   ];
 
@@ -411,7 +444,7 @@ function EmployeeTable({
         {
           title: '操作',
           key: 'actions',
-          width: 96,
+          width: 128,
           fixed: 'right',
           align: 'right',
           render: (_value, row) => <EmployeeActions employee={row} deletingEmployeeId={deletingEmployeeId} onEdit={onEdit} onDelete={onDelete} />
@@ -423,20 +456,48 @@ function EmployeeTable({
 
 function EmployeeActions({
   employee,
+  departmentId,
+  departmentName,
   deletingEmployeeId,
+  removingMembershipKey,
   onEdit,
+  onRemoveFromDepartment,
   onDelete
 }: {
   employee: FeishuContactEmployee;
+  departmentId?: string;
+  departmentName?: string;
   deletingEmployeeId?: string;
+  removingMembershipKey?: string;
   onEdit: (employee: FeishuContactEmployee) => void;
+  onRemoveFromDepartment?: (employeeId: string, departmentId: string) => void;
   onDelete: (employeeId: string) => void;
 }) {
+  const membershipKey = departmentId ? `${departmentId}:${employee.id}` : '';
   return (
     <Space size={2}>
       <Tooltip title="编辑人员">
         <Button type="text" size="small" aria-label="编辑人员" icon={<EditOutlined />} onClick={() => onEdit(employee)} />
       </Tooltip>
+      {departmentId && onRemoveFromDepartment ? (
+        <Tooltip title="从当前部门移除">
+          <Popconfirm
+            title="从当前部门移除"
+            description={`只从${departmentName ?? '当前部门'}移除，人员仍保留在通讯录。确认移除？`}
+            okText="移除"
+            cancelText="取消"
+            onConfirm={() => onRemoveFromDepartment(employee.id, departmentId)}
+          >
+            <Button
+              type="text"
+              size="small"
+              aria-label="从当前部门移除"
+              icon={<MinusCircleOutlined />}
+              loading={removingMembershipKey === membershipKey}
+            />
+          </Popconfirm>
+        </Tooltip>
+      ) : null}
       <Tooltip title="删除人员">
         <Popconfirm
           title="删除通讯录人员"

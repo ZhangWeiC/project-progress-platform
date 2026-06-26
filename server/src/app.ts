@@ -33,6 +33,7 @@ import {
   getFeishuContactsByDepartment,
   getFeishuStatus,
   loginWithFeishuCode,
+  removeFeishuContactEmployeeFromDepartment,
   syncFeishuContacts,
   updateFeishuContactEmployee
 } from './feishu.js';
@@ -636,6 +637,15 @@ app.delete('/api/admin/feishu/employees/:id', async (request) => {
   const user = getCurrentUser(request.headers);
   const { id } = z.object({ id: z.string().trim().min(1) }).parse(request.params);
   return deactivateFeishuContactEmployee(id, user);
+});
+
+app.delete('/api/admin/feishu/departments/:departmentId/employees/:employeeId', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { departmentId, employeeId } = z.object({
+    departmentId: z.string().trim().min(1),
+    employeeId: z.string().trim().min(1)
+  }).parse(request.params);
+  return removeFeishuContactEmployeeFromDepartment(employeeId, departmentId, user);
 });
 
 app.get('/api/views', async () => {

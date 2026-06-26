@@ -68,6 +68,7 @@ export function initializeDatabase() {
       department_id TEXT NOT NULL,
       is_primary INTEGER NOT NULL DEFAULT 0,
       source TEXT NOT NULL DEFAULT 'feishu',
+      locally_removed INTEGER NOT NULL DEFAULT 0,
       last_feishu_sync_at TEXT,
       PRIMARY KEY (employee_id, department_id),
       FOREIGN KEY (employee_id) REFERENCES employee(id),
@@ -489,6 +490,7 @@ function migrateFeishuIdentityColumns() {
   addColumnIfMissing('employee', 'name_overridden', 'INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing('employee', 'locally_disabled', 'INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing('employee', 'last_feishu_sync_at', 'TEXT');
+  addColumnIfMissing('employee_department', 'locally_removed', 'INTEGER NOT NULL DEFAULT 0');
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_employee_feishu_open_id ON employee(feishu_open_id);
