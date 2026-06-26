@@ -803,10 +803,15 @@ type ProjectCaseModalProps = {
 
 function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinitions, loading, onCancel, onFinish }: ProjectCaseModalProps) {
   const ownerTrees = lookups?.owner_trees ?? {};
+  const initialFormValues = useMemo(
+    () => editingProject ? projectToForm(editingProject) : createProjectDefaults(),
+    [editingProject]
+  );
   useEffect(() => {
-    if (!open || !editingProject) return;
-    form.setFieldsValue(projectToForm(editingProject));
-  }, [editingProject?.id, form, open]);
+    if (!open) return;
+    form.resetFields();
+    form.setFieldsValue(initialFormValues);
+  }, [form, initialFormValues, open]);
 
   return (
     <Modal
@@ -820,7 +825,13 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
       destroyOnClose
       forceRender
     >
-      <Form form={form} layout="vertical" onFinish={onFinish}>
+      <Form
+        key={editingProject?.id ?? 'new-project'}
+        form={form}
+        layout="vertical"
+        initialValues={initialFormValues}
+        onFinish={onFinish}
+      >
         <div className="project-form-grid">
           <Form.Item label="项目名称" name="name" rules={[{ required: true, message: '请输入项目名称' }]}>
             <Input placeholder="请输入项目名称" />
@@ -995,6 +1006,13 @@ function projectToForm(project: ProjectCase): ProjectCaseFormValues {
       (project.stage_owners ?? []).map((stage) => [stage.task_type, encodeOwnerValue(stage)])
     )
   };
+}
+
+function createProjectDefaults(): ProjectCaseFormValues {
+  return {
+    associated_month: currentMonth(),
+    items: [{ name: '', delivery_date: null, delivery_status: null, delivery_remark: null }]
+  } as ProjectCaseFormValues;
 }
 
 function normalizeProjectPayload(values: ProjectCaseFormValues, stages: StageDefinition[]): ProjectCasePayload {
