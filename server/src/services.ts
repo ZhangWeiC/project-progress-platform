@@ -632,6 +632,23 @@ export function deleteProjectCase(projectCaseId: string, user: CurrentUser) {
   return { ok: true };
 }
 
+export function deleteProjectCaseItem(projectCaseId: string, itemId: string, user: CurrentUser) {
+  assertCanManageProjects(user);
+  const existing = db.prepare('SELECT id FROM case_item WHERE project_case_id = ? AND id = ?').get(projectCaseId, itemId);
+  if (!existing) {
+    const err = new Error('子项目不存在或不属于当前项目');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+  const tx = db.transaction(() => {
+    deleteCaseItem(projectCaseId, itemId);
+    recalculateCase(projectCaseId);
+    updateProjectDeliverySummary(projectCaseId);
+  });
+  tx();
+  return { ok: true };
+}
+
 export function updateDeliveryInfo(input: DeliveryInfoInput, user: CurrentUser) {
   assertCanManageProjects(user);
   const deliveryDate = normalizeText(input.delivery_date);

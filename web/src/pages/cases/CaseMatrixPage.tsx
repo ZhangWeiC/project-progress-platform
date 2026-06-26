@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Key, MouseEvent } from 'react';
 import { TaskDrawer } from '../../components/drawers/TaskDrawer';
 import { ProgressCell } from '../../components/matrix/ProgressCell';
-import { createProjectCase, deleteProjectCase, fetchAllMatrix, fetchLookups, fetchProjectCaseManageProfile, updateDeliveryInfo, updateProjectCase } from '../../services/cases';
+import { createProjectCase, deleteProjectCase, deleteProjectCaseItem, fetchAllMatrix, fetchLookups, fetchProjectCaseManageProfile, updateDeliveryInfo, updateProjectCase } from '../../services/cases';
 import type { ProjectCasePayload } from '../../services/cases';
 import { getAuthSession } from '../../services/auth';
 import type { LookupResponse, MatrixCell, MatrixColumn, MatrixRow, ProjectCase, ProjectStageOwner } from '../../types';
@@ -120,6 +120,14 @@ export function CaseMatrixPage() {
     mutationFn: deleteProjectCase,
     onSuccess: async () => {
       message.success('项目已删除');
+      await refreshProjectQueries();
+    },
+    onError: (error) => message.error(error.message)
+  });
+  const deleteItemMutation = useMutation({
+    mutationFn: ({ caseId, itemId }: { caseId: string; itemId: string }) => deleteProjectCaseItem(caseId, itemId),
+    onSuccess: async () => {
+      message.success('子项目已删除');
       await refreshProjectQueries();
     },
     onError: (error) => message.error(error.message)
@@ -260,9 +268,15 @@ export function CaseMatrixPage() {
               <MatrixExpandIcon
                 {...props}
                 canManageProjectBasics={canManageProjectBasics}
-                deleteLoading={deleteMutation.isPending}
-                onDelete={(row) => {
+                deleteProjectLoading={deleteMutation.isPending}
+                deleteItemLoading={deleteItemMutation.isPending}
+                onDeleteProject={(row) => {
                   if (canManageProjectBasics) deleteMutation.mutate(row.project_case_id);
+                }}
+                onDeleteItem={(row) => {
+                  if (canManageProjectBasics && row.case_item_id) {
+                    deleteItemMutation.mutate({ caseId: row.project_case_id, itemId: row.case_item_id });
+                  }
                 }}
               />
             )
@@ -335,8 +349,10 @@ type MatrixExpandIconProps = {
   record: MatrixRow;
   onExpand: (record: MatrixRow, event: MouseEvent<HTMLElement>) => void;
   canManageProjectBasics: boolean;
-  deleteLoading: boolean;
-  onDelete: (row: MatrixRow) => void;
+  deleteProjectLoading: boolean;
+  deleteItemLoading: boolean;
+  onDeleteProject: (row: MatrixRow) => void;
+  onDeleteItem: (row: MatrixRow) => void;
 };
 
 function MatrixExpandIcon({
@@ -344,9 +360,39 @@ function MatrixExpandIcon({
   record,
   onExpand,
   canManageProjectBasics,
-  deleteLoading,
-  onDelete
+  deleteProjectLoading,
+  deleteItemLoading,
+  onDeleteProject,
+  onDeleteItem
 }: MatrixExpandIconProps) {
+  if (record.row_type === 'item') {
+    if (!canManageProjectBasics || !record.case_item_id) return <span className="matrix-expand-spacer" />;
+    const itemName = String(record.cells.project_item_name?.value ?? record.cells.case_item_name?.value ?? '子项目');
+    return (
+      <span className="matrix-row-action-stack matrix-row-action-stack-single">
+        <Popconfirm
+          title="删除子项目"
+          description={`确认删除「${itemName}」？会同时删除关联任务、日报、排期和异常。`}
+          okText="删除"
+          cancelText="取消"
+          okButtonProps={{ danger: true, loading: deleteItemLoading }}
+          onConfirm={() => onDeleteItem(record)}
+        >
+          <Button
+            type="text"
+            size="small"
+            danger
+            className="matrix-row-action-button"
+            icon={<DeleteOutlined />}
+            aria-label="删除子项目"
+            loading={deleteItemLoading}
+            onClick={(event) => event.stopPropagation()}
+          />
+        </Popconfirm>
+      </span>
+    );
+  }
+
   if (record.row_type !== 'project') {
     return <span className="matrix-expand-spacer" />;
   }
@@ -376,8 +422,8 @@ function MatrixExpandIcon({
           description={`确认删除「${projectName}」？会同时删除子项目、任务、日报和异常。`}
           okText="删除"
           cancelText="取消"
-          okButtonProps={{ danger: true, loading: deleteLoading }}
-          onConfirm={() => onDelete(record)}
+          okButtonProps={{ danger: true, loading: deleteProjectLoading }}
+          onConfirm={() => onDeleteProject(record)}
         >
           <Button
             type="text"
@@ -386,7 +432,7 @@ function MatrixExpandIcon({
             className="matrix-row-action-button"
             icon={<DeleteOutlined />}
             aria-label="删除项目"
-            loading={deleteLoading}
+            loading={deleteProjectLoading}
             onClick={(event) => event.stopPropagation()}
           />
         </Popconfirm>

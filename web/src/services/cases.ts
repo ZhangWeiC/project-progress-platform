@@ -44,6 +44,9 @@ export const updateDeliveryInfo = (payload: DeliveryInfoPayload) =>
 export const deleteProjectCase = (caseId: string) =>
   apiDelete<{ ok: boolean }>(`/api/cases/${caseId}`);
 
+export const deleteProjectCaseItem = (caseId: string, itemId: string) =>
+  apiDelete<{ ok: boolean }>(`/api/cases/${caseId}/items/${itemId}`);
+
 export const fetchAllMatrix = () => apiGet<MatrixResponse>('/api/cases/matrix');
 
 export const fetchCaseMatrix = (caseId: string) => apiGet<MatrixResponse>(`/api/cases/${caseId}/matrix`);

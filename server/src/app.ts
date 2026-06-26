@@ -12,6 +12,7 @@ import {
   createWorkLogEntry,
   deleteProductionPlanItem,
   deleteProjectCase,
+  deleteProjectCaseItem,
   getAllMatrix,
   getCurrentUser,
   getMatrix,
@@ -208,6 +209,12 @@ app.delete('/api/cases/:id', async (request) => {
   const user = getCurrentUser(request.headers);
   const { id } = z.object({ id: z.string() }).parse(request.params);
   return deleteProjectCase(id, user);
+});
+
+app.delete('/api/cases/:id/items/:itemId', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id, itemId } = z.object({ id: z.string(), itemId: z.string() }).parse(request.params);
+  return deleteProjectCaseItem(id, itemId, user);
 });
 
 app.get('/api/cases/matrix', async (request) => {
