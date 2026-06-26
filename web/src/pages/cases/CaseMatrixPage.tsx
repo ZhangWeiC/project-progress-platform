@@ -949,10 +949,14 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
 
 function OwnerTreeSelect({
   placeholder,
-  treeData
+  treeData,
+  value,
+  onChange
 }: {
   placeholder: string;
   treeData: NonNullable<LookupResponse['owner_trees']>[string];
+  value?: OwnerSelectValue | null;
+  onChange?: (value?: OwnerSelectValue | null) => void;
 }) {
   return (
     <TreeSelect
@@ -963,6 +967,8 @@ function OwnerTreeSelect({
       placeholder={placeholder}
       treeData={treeData}
       treeNodeFilterProp="title"
+      value={value ?? undefined}
+      onChange={onChange}
       style={{ width: '100%' }}
     />
   );
