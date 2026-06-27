@@ -85,12 +85,18 @@ function collectItemRows(rows: MatrixRow[]) {
   const result: MatrixRow[] = [];
   const walk = (items: MatrixRow[]) => {
     for (const row of items) {
-      if (row.row_type === 'item') result.push(row);
+      if (isItemRow(row)) result.push(row);
       if (row.children?.length) walk(row.children);
     }
   };
   walk(rows);
   return result;
+}
+
+function isItemRow(row: MatrixRow) {
+  if (row.row_type === 'item') return true;
+  if (row.row_type === 'month' || row.row_type === 'project') return false;
+  return Boolean(row.case_item_id && !String(row.case_item_id).startsWith('PROJECT-') && !String(row.case_item_id).startsWith('MONTH-'));
 }
 
 function cellText(cell?: MatrixCell) {
