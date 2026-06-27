@@ -1,6 +1,5 @@
 import { CompressOutlined, DeleteOutlined, ExpandAltOutlined, MinusOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
-import { Button, Card, Divider, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, TreeSelect, Typography, message } from 'antd';
-import type { TableProps } from 'antd';
+import { Button, Card, Divider, Form, Input, InputNumber, Modal, Pagination, Popconfirm, Select, Space, Table, Tag, Tooltip, TreeSelect, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
@@ -58,6 +57,8 @@ export function CaseMatrixPage() {
   const [expandedRowKeys, setExpandedRowKeys] = useState<Key[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<string>();
+  const [matrixPage, setMatrixPage] = useState(1);
+  const [matrixPageSize, setMatrixPageSize] = useState(20);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectCase | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -72,8 +73,14 @@ export function CaseMatrixPage() {
   const canManageProjectBasics = currentUser?.role === 'admin';
 
   const matrixQuery = useQuery({
-    queryKey: ['matrix', 'all'],
-    queryFn: fetchAllMatrix
+    queryKey: ['matrix', 'all', { page: matrixPage, pageSize: matrixPageSize, keyword: searchKeyword.trim(), deliveryStatus: deliveryStatusFilter ?? '' }],
+    queryFn: () => fetchAllMatrix({
+      page: matrixPage,
+      page_size: matrixPageSize,
+      keyword: searchKeyword,
+      delivery_status: deliveryStatusFilter,
+      exclude_shipped: !deliveryStatusFilter
+    })
   });
   const lookupsQuery = useQuery({ queryKey: ['lookups'], queryFn: fetchLookups, enabled: canManageProjects });
 
@@ -81,13 +88,17 @@ export function CaseMatrixPage() {
   const projectRowKeys = useMemo(() => rows.filter((row) => row.row_type === 'project').map((row) => row.row_id ?? row.case_item_id), [rows]);
   const stageDefinitions = useMemo(() => stageDefinitionsFromColumns(matrixQuery.data?.columns ?? []), [matrixQuery.data?.columns]);
 
-  const filteredRows = useMemo(() => filterRows(rows, searchKeyword, deliveryStatusFilter), [rows, searchKeyword, deliveryStatusFilter]);
   const visibleProjectRowKeys = useMemo(
-    () => filteredRows.filter((row) => row.row_type === 'project').map((row) => row.row_id ?? row.case_item_id),
-    [filteredRows]
+    () => rows.filter((row) => row.row_type === 'project').map((row) => row.row_id ?? row.case_item_id),
+    [rows]
   );
   const expandableProjectRowKeys = visibleProjectRowKeys.length ? visibleProjectRowKeys : projectRowKeys;
   const hasManualExpandedRows = visibleProjectRowKeys.some((key) => expandedRowKeys.includes(key));
+
+  useEffect(() => {
+    setMatrixPage(1);
+    setExpandedRowKeys([]);
+  }, [searchKeyword, deliveryStatusFilter]);
 
   const refreshProjectQueries = async () => {
     await Promise.all([
@@ -198,13 +209,9 @@ export function CaseMatrixPage() {
   };
 
   const tableColumns = useMemo(
-    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjects, canManageProjectBasics, openDeliveryEditor, openEditProject, deliveryStatusFilter),
-    [matrixQuery.data?.columns, canManageProjects, canManageProjectBasics, deliveryStatusFilter]
+    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjects, canManageProjectBasics, openDeliveryEditor, openEditProject),
+    [matrixQuery.data?.columns, canManageProjects, canManageProjectBasics]
   );
-  const handleTableChange: TableProps<MatrixRow>['onChange'] = (_pagination, filters) => {
-    const next = Array.isArray(filters.delivery_status) ? filters.delivery_status[0] : undefined;
-    setDeliveryStatusFilter(typeof next === 'string' ? next : undefined);
-  };
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -221,6 +228,14 @@ export function CaseMatrixPage() {
             </Tag>
           </Space>
           <Space wrap>
+            <Select
+              allowClear
+              placeholder="发货情况"
+              value={deliveryStatusFilter}
+              options={DELIVERY_STATUS_OPTIONS}
+              onChange={(value) => setDeliveryStatusFilter(value)}
+              style={{ width: 128 }}
+            />
             <Input
               allowClear
               prefix={<SearchOutlined />}
@@ -252,14 +267,13 @@ export function CaseMatrixPage() {
           rowKey={(row) => row.row_id ?? row.case_item_id}
           loading={matrixQuery.isLoading}
           columns={tableColumns}
-          dataSource={filteredRows}
+          dataSource={rows}
           pagination={false}
           size="small"
           bordered
           sticky
           tableLayout="fixed"
           scroll={{ x: 2700, y: 'calc(100vh - 178px)' }}
-          onChange={handleTableChange}
           expandable={{
             expandedRowKeys,
             onExpandedRowsChange: (keys) => setExpandedRowKeys([...keys]),
@@ -293,6 +307,21 @@ export function CaseMatrixPage() {
             return classes.join(' ');
           }}
         />
+        <div className="matrix-pagination">
+          <Pagination
+            current={matrixQuery.data?.pagination?.page ?? matrixPage}
+            pageSize={matrixQuery.data?.pagination?.page_size ?? matrixPageSize}
+            total={matrixQuery.data?.pagination?.total ?? 0}
+            showSizeChanger
+            pageSizeOptions={['20', '50', '100']}
+            showTotal={(total) => `共 ${total} 个项目`}
+            onChange={(page, pageSize) => {
+              setMatrixPage(page);
+              setMatrixPageSize(pageSize);
+              setExpandedRowKeys([]);
+            }}
+          />
+        </div>
       </Card>
 
       <TaskDrawer
@@ -447,8 +476,7 @@ function buildColumns(
   canManageProjects: boolean,
   canManageProjectBasics: boolean,
   onEditDelivery: (row: MatrixRow) => void,
-  onEditProject: (projectCaseId: string) => void,
-  deliveryStatusFilter?: string
+  onEditProject: (projectCaseId: string) => void
 ): ColumnsType<MatrixRow> {
   const leftColumns = columns
     .filter((column) => column.frozen === 'left')
@@ -503,14 +531,7 @@ function buildColumns(
               : <ProgressCell cell={row.cells[child.key]} onOpenTask={openTask} />;
           }
         };
-        if (child.key !== 'delivery_status') return column;
-        return {
-          ...column,
-          filters: DELIVERY_STATUS_OPTIONS.map((option) => ({ text: option.label, value: option.value })),
-          filteredValue: deliveryStatusFilter ? [deliveryStatusFilter] : null,
-          filterMultiple: false,
-          onFilter: () => true
-        };
+        return column;
       })
     };
   });
@@ -681,46 +702,6 @@ function EllipsisText({ text, strong, type, className }: EllipsisTextProps) {
   );
   if (!text || text === '-') return content;
   return <Tooltip title={text}>{content}</Tooltip>;
-}
-
-function filterRows(rows: MatrixRow[], keyword: string, deliveryStatus?: string) {
-  const normalizedKeyword = keyword.trim().toLowerCase();
-  if (!normalizedKeyword && !deliveryStatus) return rows;
-  const matchedRows: MatrixRow[] = [];
-  let currentMonthRow: MatrixRow | null = null;
-  let currentMonthMatched = false;
-  const appendMonthIfNeeded = () => {
-    if (!currentMonthRow || currentMonthMatched) return;
-    matchedRows.push(currentMonthRow);
-    currentMonthMatched = true;
-  };
-  for (const row of rows) {
-    if (row.row_type === 'month') {
-      currentMonthRow = row;
-      currentMonthMatched = false;
-      continue;
-    }
-    const children = row.children?.filter((child) => rowMatches(child, normalizedKeyword) && rowMatchesDeliveryStatus(child, deliveryStatus)) ?? [];
-    const rowMatched = rowMatches(row, normalizedKeyword) && rowMatchesDeliveryStatus(row, deliveryStatus);
-    if (rowMatched || children.length > 0) {
-      appendMonthIfNeeded();
-      matchedRows.push({ ...row, children: children.length > 0 ? children : row.children });
-    }
-  }
-  return matchedRows;
-}
-
-function rowMatches(row: MatrixRow, keyword: string) {
-  if (!keyword) return true;
-  return Object.values(row.cells).some((cell: MatrixCell) => {
-    const values = [cell.value, cell.ownerName, cell.departmentName, cell.deliveryRemark];
-    return values.some((value) => String(value ?? '').toLowerCase().includes(keyword));
-  });
-}
-
-function rowMatchesDeliveryStatus(row: MatrixRow, deliveryStatus?: string) {
-  if (!deliveryStatus) return true;
-  return stringCellValue(row.cells.delivery_status) === deliveryStatus;
 }
 
 type ProjectCaseModalProps = {

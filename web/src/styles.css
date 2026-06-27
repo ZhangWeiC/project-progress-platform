@@ -100,6 +100,14 @@ body {
   padding: 0;
 }
 
+.matrix-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 12px;
+  border-top: 1px solid #f0f0f0;
+  background: #fff;
+}
+
 .matrix-card .ant-table {
   font-size: 12px;
 }

@@ -44,6 +44,11 @@ export type MatrixResponse = {
     item_count: number;
     open_exception_count: number;
   };
+  pagination?: {
+    page: number;
+    page_size: number;
+    total: number;
+  };
 };
 
 export type ProjectCase = {

@@ -1473,23 +1473,105 @@ type MatrixRow = {
   associated_month?: string | null;
 };
 
-export function getAllMatrix(user: CurrentUser) {
-  const projects = getVisibleMatrixProjects(user);
+type MatrixQuery = {
+  page?: number;
+  page_size?: number;
+  keyword?: string;
+  delivery_status?: string;
+  exclude_shipped?: boolean;
+};
+
+export function getAllMatrix(user: CurrentUser, query: MatrixQuery = {}) {
+  const page = Math.max(1, query.page ?? 1);
+  const pageSize = Math.min(Math.max(query.page_size ?? 20, 1), 100);
+  const projects = filterMatrixProjects(getVisibleMatrixProjects(user), query);
+  const total = projects.length;
+  const pagedProjects = projects.slice((page - 1) * pageSize, page * pageSize);
   const templates = getMatrixTemplateColumns();
   const columns = buildMatrixColumns(templates);
-  const projectRows = projects.map((project) => buildProjectMatrixRow(project, templates, user));
+  const projectRows = pagedProjects.map((project) => buildProjectMatrixRow(project, templates, user));
   const rows = groupMatrixRowsByMonth(projectRows);
-  const itemCount = projectRows.reduce((sum, row) => sum + (row.children?.length ?? 0), 0);
-  const openExceptionCount = projectRows.reduce((sum, row) => sum + row.open_exception_count, 0);
+  const itemCount = projects.reduce((sum, project) => sum + countProjectItems(project.id), 0);
+  const openExceptionCount = projects.reduce((sum, project) => sum + project.open_exception_count, 0);
   return {
     columns,
     rows,
     summary: {
-      project_count: projectRows.length,
+      project_count: total,
       item_count: itemCount,
       open_exception_count: openExceptionCount
+    },
+    pagination: {
+      page,
+      page_size: pageSize,
+      total
     }
   };
+}
+
+function filterMatrixProjects(projects: MatrixProject[], query: MatrixQuery) {
+  const keyword = normalizeText(query.keyword)?.toLowerCase();
+  const deliveryStatus = normalizeDeliveryStatus(query.delivery_status);
+  return projects.filter((project) => {
+    const projectDeliveryStatus = getMatrixProjectDeliveryStatus(project.id);
+    if (deliveryStatus && projectDeliveryStatus !== deliveryStatus) return false;
+    if (!deliveryStatus && query.exclude_shipped && projectDeliveryStatus === '已发货') return false;
+    if (!keyword) return true;
+    return matrixProjectMatchesKeyword(project, keyword, projectDeliveryStatus);
+  });
+}
+
+function getMatrixProjectDeliveryStatus(projectCaseId: string) {
+  const items = db.prepare('SELECT delivery_status, delivery_remark FROM case_item WHERE project_case_id = ?').all(projectCaseId) as Array<{
+    delivery_status: string | null;
+    delivery_remark: string | null;
+  }>;
+  return aggregateDeliveryStatus(items).status ?? '未发货';
+}
+
+function matrixProjectMatchesKeyword(project: MatrixProject, keyword: string, projectDeliveryStatus: DeliveryStatus) {
+  const directValues = [
+    project.name,
+    project.business_owner_name,
+    project.design_owner_name,
+    project.delivery_date,
+    projectDeliveryStatus,
+    project.delivery_remark,
+    project.associated_month
+  ];
+  if (directValues.some((value) => String(value ?? '').toLowerCase().includes(keyword))) return true;
+  const like = `%${escapeLike(keyword)}%`;
+  const itemMatch = db
+    .prepare("SELECT 1 FROM case_item WHERE project_case_id = ? AND LOWER(name) LIKE ? ESCAPE '\\' LIMIT 1")
+    .get(project.id, like);
+  if (itemMatch) return true;
+  const ownerMatch = db
+    .prepare(
+      `SELECT 1
+       FROM case_task t
+       LEFT JOIN employee e ON e.id = t.assignee_id
+       LEFT JOIN team tm ON tm.id = t.team_id
+       LEFT JOIN department d ON d.id = t.owner_department_id
+       WHERE t.project_case_id = ?
+         AND (
+           LOWER(t.name) LIKE ? ESCAPE '\\'
+           OR LOWER(COALESCE(e.name, '')) LIKE ? ESCAPE '\\'
+           OR LOWER(COALESCE(tm.name, '')) LIKE ? ESCAPE '\\'
+           OR LOWER(COALESCE(d.name, '')) LIKE ? ESCAPE '\\'
+         )
+       LIMIT 1`
+    )
+    .get(project.id, like, like, like, like);
+  return Boolean(ownerMatch);
+}
+
+function escapeLike(value: string) {
+  return value.replace(/[\\%_]/g, (matched) => `\\${matched}`);
+}
+
+function countProjectItems(projectCaseId: string) {
+  const row = db.prepare('SELECT COUNT(*) as count FROM case_item WHERE project_case_id = ?').get(projectCaseId) as { count: number };
+  return row.count;
 }
 
 function getVisibleMatrixProjects(user: CurrentUser) {

@@ -219,7 +219,14 @@ app.delete('/api/cases/:id/items/:itemId', async (request) => {
 
 app.get('/api/cases/matrix', async (request) => {
   const user = getCurrentUser(request.headers);
-  return getAllMatrix(user);
+  const query = z.object({
+    page: z.coerce.number().int().min(1).optional(),
+    page_size: z.coerce.number().int().min(1).max(100).optional(),
+    keyword: z.string().trim().optional(),
+    delivery_status: z.string().trim().optional(),
+    exclude_shipped: z.coerce.boolean().optional()
+  }).parse(request.query);
+  return getAllMatrix(user, query);
 });
 
 app.get('/api/cases/:id/manage-profile', async (request) => {

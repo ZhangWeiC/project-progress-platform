@@ -47,7 +47,24 @@ export const deleteProjectCase = (caseId: string) =>
 export const deleteProjectCaseItem = (caseId: string, itemId: string) =>
   apiDelete<{ ok: boolean }>(`/api/cases/${caseId}/items/${itemId}`);
 
-export const fetchAllMatrix = () => apiGet<MatrixResponse>('/api/cases/matrix');
+export type MatrixQueryParams = {
+  page?: number;
+  page_size?: number;
+  keyword?: string;
+  delivery_status?: string;
+  exclude_shipped?: boolean;
+};
+
+export const fetchAllMatrix = (params: MatrixQueryParams = {}) => {
+  const search = new URLSearchParams();
+  if (params.page) search.set('page', String(params.page));
+  if (params.page_size) search.set('page_size', String(params.page_size));
+  if (params.keyword?.trim()) search.set('keyword', params.keyword.trim());
+  if (params.delivery_status) search.set('delivery_status', params.delivery_status);
+  if (params.exclude_shipped) search.set('exclude_shipped', '1');
+  const query = search.toString();
+  return apiGet<MatrixResponse>(`/api/cases/matrix${query ? `?${query}` : ''}`);
+};
 
 export const fetchCaseMatrix = (caseId: string) => apiGet<MatrixResponse>(`/api/cases/${caseId}/matrix`);
 
