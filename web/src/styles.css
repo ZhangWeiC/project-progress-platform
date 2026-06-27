@@ -960,6 +960,62 @@ body {
   margin: 0;
 }
 
+.mobile-stage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mobile-stage-button {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+}
+
+.mobile-stage-button.is-editable {
+  border-color: #91caff;
+  background: #f0f7ff;
+}
+
+.mobile-stage-button.is-locked {
+  color: #6b7280;
+}
+
+.mobile-stage-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mobile-stage-main strong {
+  flex: 0 0 auto;
+  color: #1677ff;
+}
+
+.mobile-stage-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-stage-owner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
 .mobile-progress-editor {
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr);

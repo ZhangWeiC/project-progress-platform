@@ -1869,6 +1869,9 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
     .get(projectCaseId) as {
       id: string;
       name: string;
+      status: string;
+      total_progress: number;
+      associated_month: string | null;
       delivery_date: string | null;
       delivery_status: string | null;
       business_owner_name: string | null;
@@ -1915,14 +1918,12 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
     }))
   ];
 
-  const caseTasks = db
-    .prepare('SELECT * FROM case_task WHERE project_case_id = ? AND case_item_id IS NULL')
-    .all(projectCaseId) as Array<{ id: string; task_type: string; name: string; progress: number }>;
+  const caseTasks = getMatrixTasks(projectCaseId, null);
 
   const rows = items.map((item) => {
-    const itemTasks = db.prepare('SELECT * FROM case_task WHERE case_item_id = ?').all(item.id) as Array<{ id: string; task_type: string; name: string; progress: number }>;
+    const itemTasks = getMatrixTasks(projectCaseId, item.id);
     const tasks = [...caseTasks, ...itemTasks];
-    const cells: Record<string, unknown> = {
+    const cells: Record<string, MatrixCell> = {
       case_name: { value: projectCase.name },
       case_item_name: { value: item.name },
       business_owner_name: { value: projectCase.business_owner_name ?? '' },
@@ -1940,7 +1941,7 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
     cells.open_exception_count = { value: openExceptionCount.count };
 
     for (const task of tasks) {
-      const subtasks = db.prepare('SELECT * FROM case_subtask WHERE case_task_id = ?').all(task.id) as Array<{ id: string; subtask_template_id: string; progress: number; status: string }>;
+      const subtasks = getMatrixSubtasks(task.id);
       for (const subtask of subtasks) {
         const key = `${task.task_type}.${subtask.subtask_template_id}`;
         if (!subtaskTemplates.some((template) => `${template.task_type}.${template.subtask_template_id}` === key)) continue;
@@ -1950,17 +1951,24 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
           editable: canEditSubtask(user, subtask.id),
           targetType: 'subtask',
           targetId: subtask.id,
-          taskId: task.id
+          taskId: task.id,
+          ownerName: ownerLabel(subtask, task),
+          departmentName: task.department_name,
+          progress_started_at: subtask.progress_started_at ?? (subtask.progress > 0 ? task.actual_start_at : null),
+          progress_finished_at: subtask.progress >= 100 ? subtask.progress_finished_at ?? task.actual_finish_at : null
         };
       }
     }
 
     return {
+      row_id: item.id,
+      row_type: 'item',
       project_case_id: projectCaseId,
       case_item_id: item.id,
       item_progress: item.progress,
       cells,
-      open_exception_count: openExceptionCount.count
+      open_exception_count: openExceptionCount.count,
+      associated_month: projectCase.associated_month
     };
   });
 
