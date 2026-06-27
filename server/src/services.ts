@@ -25,7 +25,7 @@ export function assertCanReadCase(user: CurrentUser, projectCaseId: string) {
 }
 
 export function canManageProjects(user: CurrentUser) {
-  return user.role === 'admin' || user.permission_level === 'manager';
+  return user.permission_level === 'manager';
 }
 
 export function canEditProgress(user: CurrentUser) {

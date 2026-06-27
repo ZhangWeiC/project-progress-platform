@@ -386,7 +386,7 @@ function requireFeishuConfig() {
 }
 
 function canManageFeishuContacts(user: CurrentUser) {
-  return user.role === 'admin' || user.permission_level === 'manager';
+  return user.permission_level === 'manager';
 }
 
 function assertCanManageFeishuContacts(user: CurrentUser, message: string) {

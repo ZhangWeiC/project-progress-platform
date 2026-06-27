@@ -65,12 +65,8 @@ export function CaseMatrixPage() {
   const queryClient = useQueryClient();
   const watchedDeliveryStatus = Form.useWatch('delivery_status', deliveryForm);
   const currentUser = getAuthSession()?.user;
-  const canManageProjects = Boolean(
-    currentUser?.role === 'admin' ||
-    currentUser?.role === 'business_owner' ||
-    currentUser?.permission_level === 'manager'
-  );
-  const canManageProjectBasics = currentUser?.role === 'admin';
+  const canManageProjects = currentUser?.permission_level === 'manager';
+  const canManageProjectBasics = currentUser?.permission_level === 'manager';
 
   const matrixQuery = useQuery({
     queryKey: ['matrix', 'all', { page: matrixPage, pageSize: matrixPageSize, keyword: searchKeyword.trim(), deliveryStatus: deliveryStatusFilter ?? '' }],
