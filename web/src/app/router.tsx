@@ -16,10 +16,17 @@ import { MobileCasesPage } from '../pages/mobile/MobileCasesPage';
 import { LoginPage } from '../pages/login/LoginPage';
 import { FeishuCallbackPage } from '../pages/auth/FeishuCallbackPage';
 import { RequireAuth } from '../components/auth/RequireAuth';
+import { getAuthSession } from '../services/auth';
 
 function HomeRedirect() {
   const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
   return <Navigate to={isMobile ? '/m/cases' : '/cases'} replace />;
+}
+
+function AdminOnly({ children }: { children: JSX.Element }) {
+  const user = getAuthSession()?.user;
+  if (user?.permission_level !== 'manager') return <Navigate to="/cases" replace />;
+  return children;
 }
 
 export const router = createBrowserRouter([
@@ -37,7 +44,7 @@ export const router = createBrowserRouter([
       { path: 'exceptions', element: <ExceptionsPage /> },
       { path: 'imports', element: <ImportsPage /> },
       { path: 'reports', element: <ReportsPage /> },
-      { path: 'settings/:section?', element: <SettingsPage /> }
+      { path: 'settings/:section?', element: <AdminOnly><SettingsPage /></AdminOnly> }
     ]
   },
   {

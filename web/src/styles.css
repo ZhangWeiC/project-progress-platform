@@ -60,10 +60,31 @@ body {
   height: 56px;
   display: flex;
   align-items: center;
-  padding: 0 20px;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px 0 20px;
   font-weight: 700;
   letter-spacing: 0;
   color: #1f2937;
+}
+
+.brand-collapsed {
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  height: 72px;
+  padding: 8px 0;
+}
+
+.brand-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand-collapsed .brand-title {
+  font-size: 12px;
 }
 
 .app-header {
