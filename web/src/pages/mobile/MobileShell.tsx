@@ -1,4 +1,4 @@
-import { AppstoreOutlined, ExceptionOutlined, FormOutlined, LogoutOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, ExceptionOutlined, FormOutlined, LogoutOutlined, ProjectOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import { Button, Layout, Menu, Typography } from 'antd';
 import { useQueryClient } from '@tanstack/react-query';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -15,7 +15,9 @@ export function MobileShell() {
       ? '/m/work-logs/new'
       : location.pathname.includes('/m/exceptions')
         ? '/m/exceptions'
-        : '/m';
+        : location.pathname.includes('/m/cases')
+          ? '/m/cases'
+          : '/m';
 
   return (
     <Layout className="mobile-shell">
@@ -42,6 +44,7 @@ export function MobileShell() {
         onClick={(event) => navigate(event.key)}
         items={[
           { key: '/m', icon: <AppstoreOutlined />, label: '工作台' },
+          { key: '/m/cases', icon: <ProjectOutlined />, label: '项目' },
           { key: '/m/tasks', icon: <UnorderedListOutlined />, label: '任务' },
           { key: '/m/work-logs/new', icon: <FormOutlined />, label: '日报' },
           { key: '/m/exceptions', icon: <ExceptionOutlined />, label: '异常' }

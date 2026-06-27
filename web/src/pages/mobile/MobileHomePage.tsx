@@ -19,6 +19,7 @@ export function MobileHomePage() {
       <Card size="small" title="快捷入口">
         <Space direction="vertical" style={{ width: '100%' }}>
           <Button block type="primary" onClick={() => navigate('/m/work-logs/new')}>录入日报</Button>
+          <Button block onClick={() => navigate('/m/cases')}>查看项目进度</Button>
           <Button block onClick={() => navigate('/m/tasks')}>查看我的任务</Button>
           <Button block onClick={() => navigate('/m/exceptions')}>处理异常</Button>
         </Space>

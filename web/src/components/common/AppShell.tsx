@@ -2,6 +2,7 @@ import { AppstoreOutlined, BarChartOutlined, CalendarOutlined, DashboardOutlined
 import { Avatar, Button, Layout, Menu, Space, Typography } from 'antd';
 import { useQueryClient } from '@tanstack/react-query';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { getAuthSession, logoutRequest } from '../../services/auth';
 
 const { Header, Sider, Content } = Layout;
@@ -23,6 +24,19 @@ export function AppShell() {
   const queryClient = useQueryClient();
   const user = getAuthSession()?.user;
   const selectedKey = menuItems.find((item) => location.pathname.startsWith(item.key))?.key ?? '/dashboard';
+
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 768px)').matches) {
+      const target = location.pathname.startsWith('/cases')
+        ? '/m/cases'
+        : location.pathname.startsWith('/work-logs')
+          ? '/m/work-logs/new'
+          : location.pathname.startsWith('/exceptions')
+            ? '/m/exceptions'
+            : '/m';
+      navigate(target, { replace: true });
+    }
+  }, [location.pathname, navigate]);
 
   return (
     <Layout className="app-shell">

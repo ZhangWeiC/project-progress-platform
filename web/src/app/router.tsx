@@ -14,9 +14,15 @@ import { MobileTaskListPage } from '../pages/mobile/MobileTaskListPage';
 import { MobileWorkLogPage } from '../pages/mobile/MobileWorkLogPage';
 import { MobileExceptionsPage } from '../pages/mobile/MobileExceptionsPage';
 import { MobileCaseSummaryPage } from '../pages/mobile/MobileCaseSummaryPage';
+import { MobileCasesPage } from '../pages/mobile/MobileCasesPage';
 import { LoginPage } from '../pages/login/LoginPage';
 import { FeishuCallbackPage } from '../pages/auth/FeishuCallbackPage';
 import { RequireAuth } from '../components/auth/RequireAuth';
+
+function HomeRedirect() {
+  const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
+  return <Navigate to={isMobile ? '/m' : '/dashboard'} replace />;
+}
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -25,7 +31,7 @@ export const router = createBrowserRouter([
     path: '/',
     element: <RequireAuth><AppShell /></RequireAuth>,
     children: [
-      { index: true, element: <Navigate to="/dashboard" replace /> },
+      { index: true, element: <HomeRedirect /> },
       { path: 'dashboard', element: <DashboardPage /> },
       { path: 'cases', element: <CaseMatrixPage /> },
       { path: 'production-plans', element: <ProductionPlansPage /> },
@@ -41,6 +47,7 @@ export const router = createBrowserRouter([
     element: <RequireAuth><MobileShell /></RequireAuth>,
     children: [
       { index: true, element: <MobileHomePage /> },
+      { path: 'cases', element: <MobileCasesPage /> },
       { path: 'tasks', element: <MobileTaskListPage /> },
       { path: 'work-logs/new', element: <MobileWorkLogPage /> },
       { path: 'exceptions', element: <MobileExceptionsPage /> },
