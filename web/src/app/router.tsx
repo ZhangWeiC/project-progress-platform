@@ -1,6 +1,5 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { AppShell } from '../components/common/AppShell';
-import { DashboardPage } from '../pages/dashboard/DashboardPage';
 import { CaseMatrixPage } from '../pages/cases/CaseMatrixPage';
 import { WorkLogsPage } from '../pages/work-logs/WorkLogsPage';
 import { ProductionPlansPage } from '../pages/production-plans/ProductionPlansPage';
@@ -9,7 +8,6 @@ import { ImportsPage } from '../pages/imports/ImportsPage';
 import { ReportsPage } from '../pages/reports/ReportsPage';
 import { SettingsPage } from '../pages/settings/SettingsPage';
 import { MobileShell } from '../pages/mobile/MobileShell';
-import { MobileHomePage } from '../pages/mobile/MobileHomePage';
 import { MobileTaskListPage } from '../pages/mobile/MobileTaskListPage';
 import { MobileWorkLogPage } from '../pages/mobile/MobileWorkLogPage';
 import { MobileExceptionsPage } from '../pages/mobile/MobileExceptionsPage';
@@ -21,7 +19,7 @@ import { RequireAuth } from '../components/auth/RequireAuth';
 
 function HomeRedirect() {
   const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
-  return <Navigate to={isMobile ? '/m' : '/dashboard'} replace />;
+  return <Navigate to={isMobile ? '/m/cases' : '/cases'} replace />;
 }
 
 export const router = createBrowserRouter([
@@ -32,7 +30,7 @@ export const router = createBrowserRouter([
     element: <RequireAuth><AppShell /></RequireAuth>,
     children: [
       { index: true, element: <HomeRedirect /> },
-      { path: 'dashboard', element: <DashboardPage /> },
+      { path: 'dashboard', element: <Navigate to="/cases" replace /> },
       { path: 'cases', element: <CaseMatrixPage /> },
       { path: 'production-plans', element: <ProductionPlansPage /> },
       { path: 'work-logs', element: <WorkLogsPage /> },
@@ -46,7 +44,7 @@ export const router = createBrowserRouter([
     path: '/m',
     element: <RequireAuth><MobileShell /></RequireAuth>,
     children: [
-      { index: true, element: <MobileHomePage /> },
+      { index: true, element: <Navigate to="/m/cases" replace /> },
       { path: 'cases', element: <MobileCasesPage /> },
       { path: 'tasks', element: <MobileTaskListPage /> },
       { path: 'work-logs/new', element: <MobileWorkLogPage /> },
