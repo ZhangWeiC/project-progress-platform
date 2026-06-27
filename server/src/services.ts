@@ -3,7 +3,6 @@ import { authenticate } from './auth.js';
 
 export type CurrentUser = {
   id: string;
-  role: string;
   name: string;
   permission_level: string;
 };

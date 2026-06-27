@@ -769,14 +769,14 @@ function seedDatabase() {
   ]);
 
   insertMany('employee', [
-    { id: 'user-admin', name: '管理员', department_id: 'dept-business', role: 'admin', permission_level: 'manager' },
-    { id: 'user-zhang', name: '张剑华', department_id: 'dept-business', role: 'business_owner', permission_level: 'manager' },
-    { id: 'user-wei-li', name: '魏立', department_id: 'dept-design', role: 'design_owner', permission_level: 'editor' },
-    { id: 'user-rao', name: '饶家忠', department_id: 'dept-design', role: 'design_owner', permission_level: 'editor' },
-    { id: 'user-wei-zong', name: '魏总', department_id: 'dept-material', role: 'material_owner', permission_level: 'editor' },
-    { id: 'user-wang', name: '王世金', department_id: 'dept-production', role: 'team_leader', permission_level: 'editor' },
-    { id: 'user-team2', name: '二组班组长', department_id: 'dept-production', role: 'team_leader', permission_level: 'editor' },
-    { id: 'user-li', name: '李嘉俊', department_id: 'dept-quality', role: 'quality_owner', permission_level: 'editor' },
+    { id: 'user-admin', name: '管理员', department_id: 'dept-business', role: 'worker', permission_level: 'manager' },
+    { id: 'user-zhang', name: '张剑华', department_id: 'dept-business', role: 'worker', permission_level: 'manager' },
+    { id: 'user-wei-li', name: '魏立', department_id: 'dept-design', role: 'worker', permission_level: 'editor' },
+    { id: 'user-rao', name: '饶家忠', department_id: 'dept-design', role: 'worker', permission_level: 'editor' },
+    { id: 'user-wei-zong', name: '魏总', department_id: 'dept-material', role: 'worker', permission_level: 'editor' },
+    { id: 'user-wang', name: '王世金', department_id: 'dept-production', role: 'worker', permission_level: 'editor' },
+    { id: 'user-team2', name: '二组班组长', department_id: 'dept-production', role: 'worker', permission_level: 'editor' },
+    { id: 'user-li', name: '李嘉俊', department_id: 'dept-quality', role: 'worker', permission_level: 'editor' },
     { id: 'user-zhangsan', name: '张三', department_id: 'dept-production', role: 'worker', permission_level: 'viewer' }
   ]);
 

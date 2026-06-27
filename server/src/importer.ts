@@ -576,21 +576,15 @@ function upsertCaseTask(projectId: string, itemId: string | null, templateId: st
   return taskId;
 }
 
-function ensureEmployee(name: string, departmentId: string, role: string) {
+function ensureEmployee(name: string, departmentId: string, _legacyRole: string) {
   const trimmed = name.trim();
   if (!trimmed) return null;
   const existing = db.prepare('SELECT id FROM employee WHERE name = ?').get(trimmed) as { id: string } | undefined;
   if (existing) return existing.id;
   const id = stableId('USER', trimmed);
   db.prepare('INSERT OR IGNORE INTO employee (id, name, department_id, role, permission_level) VALUES (?, ?, ?, ?, ?)')
-    .run(id, trimmed, departmentId, role, defaultPermissionLevel(role));
+    .run(id, trimmed, departmentId, 'worker', 'viewer');
   return id;
-}
-
-function defaultPermissionLevel(role: string) {
-  if (role === 'admin' || role === 'business_owner') return 'manager';
-  if (['design_owner', 'material_owner', 'quality_owner', 'team_leader'].includes(role)) return 'editor';
-  return 'viewer';
 }
 
 function monthFromDate(value: string | null | undefined) {

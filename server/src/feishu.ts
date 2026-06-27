@@ -5,7 +5,6 @@ import type { CurrentUser } from './services.js';
 
 const FEISHU_API_BASE = process.env.FEISHU_API_BASE ?? 'https://open.feishu.cn/open-apis';
 const FEISHU_AUTHORIZE_URL = process.env.FEISHU_AUTHORIZE_URL ?? 'https://accounts.feishu.cn/open-apis/authen/v1/authorize';
-const FEISHU_DEFAULT_ROLE = process.env.FEISHU_DEFAULT_ROLE ?? 'worker';
 const FEISHU_ROOT_DEPARTMENT_ID = process.env.FEISHU_ROOT_DEPARTMENT_ID ?? '0';
 const FEISHU_OAUTH_SCOPE = process.env.FEISHU_OAUTH_SCOPE ?? 'auth:user.id:read user_profile';
 const PERMISSION_LEVELS = new Set(['manager', 'editor', 'viewer']);
@@ -65,7 +64,6 @@ type SyncStats = {
 type LocalEmployee = {
   id: string;
   name: string;
-  role: string;
   permission_level: string;
   department_id: string | null;
   is_active: number;
@@ -104,7 +102,6 @@ type ContactDepartmentRow = {
 type ContactEmployeeRow = {
   id: string;
   name: string;
-  role: string;
   permission_level: string;
   department_id: string | null;
   feishu_open_id: string | null;
@@ -151,7 +148,7 @@ export function getFeishuContactsByDepartment() {
   ).all() as Array<Omit<ContactDepartmentRow, 'employees' | 'children'>>;
 
   const employees = db.prepare(
-    `SELECT e.id, e.name, e.role, e.permission_level, e.department_id, e.feishu_open_id, e.is_active,
+    `SELECT e.id, e.name, e.permission_level, e.department_id, e.feishu_open_id, e.is_active,
             e.name_overridden, e.locally_disabled,
             ed.department_id as group_department_id, ed.is_primary
      FROM employee e
@@ -206,7 +203,7 @@ export async function loginWithFeishuCode(code: string, state: string) {
     throw err;
   }
   return {
-    ...createSession({ id: employee.id, name: employee.name, role: employee.role, permission_level: employee.permission_level }),
+    ...createSession({ id: employee.id, name: employee.name, permission_level: employee.permission_level }),
     redirect: safeRedirectPath(parsedState.redirect)
   };
 }
@@ -299,7 +296,7 @@ export function updateFeishuContactEmployee(
   ).run(name, permissionLevel, employeeId);
 
   return db.prepare(
-    `SELECT id, name, role, permission_level, department_id, feishu_open_id, is_active, name_overridden, locally_disabled
+    `SELECT id, name, permission_level, department_id, feishu_open_id, is_active, name_overridden, locally_disabled
      FROM employee
      WHERE id = ?`
   ).get(employeeId);
@@ -539,7 +536,7 @@ function upsertEmployeeFromFeishu(user: FeishuOAuthUser | undefined): LocalEmplo
   const existing = findEmployee(employee);
   const saved = saveFeishuEmployee(employee, existing, existing?.department_id ?? undefined, 1, nowIso());
   const row = db.prepare(
-    `SELECT id, name, role, permission_level, department_id, is_active, name_overridden, locally_disabled
+    `SELECT id, name, permission_level, department_id, is_active, name_overridden, locally_disabled
      FROM employee
      WHERE id = ?`
   ).get(saved.id) as LocalEmployee | null;
@@ -555,7 +552,6 @@ function saveFeishuEmployee(
   syncedAt: string
 ) {
   const localId = existing?.id ?? makeFeishuLocalId('USER', employee.openId || employee.unionId || employee.userId || employee.email || employee.name);
-  const role = existing?.role ?? FEISHU_DEFAULT_ROLE;
   const permissionLevel = existing?.permission_level ?? 'viewer';
   const targetDepartmentId = departmentId ?? existing?.department_id ?? null;
   const displayName = Number(existing?.name_overridden ?? 0) === 1 ? existing?.name ?? employee.name : employee.name;
@@ -564,12 +560,11 @@ function saveFeishuEmployee(
   if (existing) {
     db.prepare(
       `UPDATE employee
-       SET name = ?, department_id = ?, role = ?, permission_level = ?, feishu_open_id = ?, feishu_union_id = ?, feishu_user_id = ?, email = ?, mobile = ?, avatar_url = ?, is_active = ?, last_feishu_sync_at = ?
+       SET name = ?, department_id = ?, permission_level = ?, feishu_open_id = ?, feishu_union_id = ?, feishu_user_id = ?, email = ?, mobile = ?, avatar_url = ?, is_active = ?, last_feishu_sync_at = ?
        WHERE id = ?`
     ).run(
       displayName,
       targetDepartmentId,
-      role,
       permissionLevel,
       employee.openId,
       employee.unionId,
@@ -591,8 +586,8 @@ function saveFeishuEmployee(
     localId,
     employee.name,
     targetDepartmentId,
-    role,
-    permissionLevel,
+    'worker',
+    'viewer',
     employee.openId,
     employee.unionId,
     employee.userId,
@@ -645,14 +640,14 @@ function findEmployee(employee: ReturnType<typeof normalizeFeishuEmployee>): Loc
   for (const [column, value] of queries) {
     if (!value) continue;
     const found = db.prepare(
-      `SELECT id, name, role, permission_level, department_id, is_active, name_overridden, locally_disabled
+      `SELECT id, name, permission_level, department_id, is_active, name_overridden, locally_disabled
        FROM employee
        WHERE ${column} = ?`
     ).get(value) as LocalEmployee | undefined;
     if (found) return found;
   }
   return (db.prepare(
-    `SELECT id, name, role, permission_level, department_id, is_active, name_overridden, locally_disabled
+    `SELECT id, name, permission_level, department_id, is_active, name_overridden, locally_disabled
      FROM employee
      WHERE name = ?`
   ).get(employee.name) as LocalEmployee | undefined) ?? null;

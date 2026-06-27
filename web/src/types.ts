@@ -217,7 +217,7 @@ export type TaskDetails = {
 };
 
 export type LookupResponse = {
-  employees: Array<{ id: string; name: string; role: string; permission_level?: string; department_id?: string }>;
+  employees: Array<{ id: string; name: string; permission_level?: string; department_id?: string }>;
   departments: Array<{ id: string; name: string }>;
   teams: Array<{ id: string; name: string; leader_id?: string }>;
   owner_trees?: Record<string, OwnerLookupNode[]>;
@@ -236,7 +236,7 @@ export type WorkbenchTask = CaseTask & {
 };
 
 export type WorkbenchResponse = {
-  user: { id: string; name: string; role: string };
+  user: { id: string; name: string; permission_level?: string };
   counts: { tasks: number; exceptions: number; overdue: number };
   tasks: WorkbenchTask[];
   exceptions: ExceptionRecord[];

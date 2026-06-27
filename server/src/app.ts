@@ -614,7 +614,14 @@ app.get('/api/me/exceptions', async (request) => {
 
 app.get('/api/lookups', async () => {
   return {
-    employees: db.prepare('SELECT * FROM employee WHERE COALESCE(is_active, 1) = 1 ORDER BY name').all(),
+    employees: db
+      .prepare(
+        `SELECT id, name, permission_level, department_id
+         FROM employee
+         WHERE COALESCE(is_active, 1) = 1
+         ORDER BY name`
+      )
+      .all(),
     departments: db.prepare("SELECT * FROM department WHERE status IS NULL OR status != 'deleted' ORDER BY name").all(),
     teams: db.prepare('SELECT * FROM team ORDER BY name').all(),
     owner_trees: buildOwnerLookupTrees()
@@ -742,7 +749,7 @@ type WorkbenchTask = {
 
 type WorkbenchException = Record<string, unknown>;
 
-function getMyTasks(user: { id: string; name: string; role: string; permission_level: string }): WorkbenchTask[] {
+function getMyTasks(user: { id: string; name: string; permission_level: string }): WorkbenchTask[] {
   if (canManageProjects(user)) {
     return db.prepare(
       `SELECT t.*, pc.name as case_name, ci.name as item_name, team.name as team_name,
@@ -767,7 +774,7 @@ function getMyTasks(user: { id: string; name: string; role: string; permission_l
   ).all(user.id, user.id) as WorkbenchTask[];
 }
 
-function getMyExceptions(user: { id: string; name: string; role: string; permission_level: string }): WorkbenchException[] {
+function getMyExceptions(user: { id: string; name: string; permission_level: string }): WorkbenchException[] {
   if (canManageProjects(user)) {
     return db.prepare(
       `SELECT ex.*, pc.name as case_name, ci.name as item_name, t.name as task_name, s.name as subtask_name,

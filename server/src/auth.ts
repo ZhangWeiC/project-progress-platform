@@ -10,14 +10,13 @@ type CredentialRecord = {
   password_hash: string;
   enabled: number;
   name: string;
-  role: string;
   permission_level: string;
 };
 
 export function login(loginName: string, password: string) {
   const credential = db
     .prepare(
-      `SELECT c.employee_id, c.password_salt, c.password_hash, c.enabled, e.name, e.role, e.permission_level
+      `SELECT c.employee_id, c.password_salt, c.password_hash, c.enabled, e.name, e.permission_level
        FROM user_credential c
        JOIN employee e ON e.id = c.employee_id
        WHERE lower(c.login_name) = lower(?) OR e.name = ?`
@@ -33,7 +32,6 @@ export function login(loginName: string, password: string) {
   return createSession({
     id: credential.employee_id,
     name: credential.name,
-    role: credential.role,
     permission_level: credential.permission_level
   });
 }
@@ -54,7 +52,7 @@ export function authenticate(authorization: unknown): CurrentUser {
 
   const user = db
     .prepare(
-      `SELECT e.id, e.name, e.role, e.permission_level
+      `SELECT e.id, e.name, e.permission_level
        FROM auth_session s
        JOIN employee e ON e.id = s.employee_id
        WHERE s.token_hash = ? AND s.expires_at > ? AND COALESCE(e.is_active, 1) = 1`
