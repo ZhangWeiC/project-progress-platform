@@ -49,7 +49,7 @@ export function AppShell() {
         onClick={() => collapsed && setCollapsed(false)}
       >
         <div className={`brand ${collapsed ? 'brand-collapsed' : ''}`}>
-          <Typography.Text strong className="brand-title">{collapsed ? '进度' : '项目进度平台'}</Typography.Text>
+          <Typography.Text strong className="brand-title">埃弗尔</Typography.Text>
           <Button
             type="text"
             size="small"
