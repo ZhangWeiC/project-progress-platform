@@ -19,6 +19,7 @@ const DELIVERY_STATUS_OPTIONS = [
   { label: '发货中', value: '发货中' },
   { label: '其他', value: '其他' }
 ];
+const DEFAULT_DELIVERY_STATUS_FILTER = ['未发货', '待发货', '发货中'];
 const DELIVERY_STATUS_COLORS: Record<string, string> = {
   已发货: 'success',
   未发货: 'default',
@@ -56,7 +57,7 @@ export function CaseMatrixPage() {
   const [deliveryEditor, setDeliveryEditor] = useState<DeliveryEditorTarget | null>(null);
   const [expandedRowKeys, setExpandedRowKeys] = useState<Key[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<string>();
+  const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<string[]>(DEFAULT_DELIVERY_STATUS_FILTER);
   const [matrixPage, setMatrixPage] = useState(1);
   const [matrixPageSize, setMatrixPageSize] = useState(20);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
@@ -69,13 +70,12 @@ export function CaseMatrixPage() {
   const canManageProjectBasics = currentUser?.permission_level === 'manager';
 
   const matrixQuery = useQuery({
-    queryKey: ['matrix', 'all', { page: matrixPage, pageSize: matrixPageSize, keyword: searchKeyword.trim(), deliveryStatus: deliveryStatusFilter ?? '' }],
+    queryKey: ['matrix', 'all', { page: matrixPage, pageSize: matrixPageSize, keyword: searchKeyword.trim(), deliveryStatus: deliveryStatusFilter }],
     queryFn: () => fetchAllMatrix({
       page: matrixPage,
       page_size: matrixPageSize,
       keyword: searchKeyword,
-      delivery_status: deliveryStatusFilter,
-      exclude_shipped: !deliveryStatusFilter
+      delivery_status: deliveryStatusFilter
     })
   });
   const lookupsQuery = useQuery({ queryKey: ['lookups'], queryFn: fetchLookups, enabled: canManageProjects });
@@ -226,11 +226,13 @@ export function CaseMatrixPage() {
           <Space wrap>
             <Select
               allowClear
+              mode="multiple"
+              maxTagCount="responsive"
               placeholder="发货情况"
               value={deliveryStatusFilter}
               options={DELIVERY_STATUS_OPTIONS}
               onChange={(value) => setDeliveryStatusFilter(value)}
-              style={{ width: 128 }}
+              style={{ width: 240 }}
             />
             <Input
               allowClear

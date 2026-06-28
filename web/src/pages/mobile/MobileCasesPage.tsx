@@ -7,6 +7,7 @@ import type { MatrixCell, MatrixRow } from '../../types';
 
 type ProjectRow = MatrixRow & { mobileMonth: string };
 type FilterMode = 'active' | 'shipped' | 'all';
+const ACTIVE_DELIVERY_STATUS_FILTER = ['未发货', '待发货', '发货中'];
 
 const DELIVERY_STATUS_COLORS: Record<string, string> = {
   已发货: 'success',
@@ -26,8 +27,7 @@ export function MobileCasesPage() {
       page: 1,
       page_size: 100,
       keyword: keyword.trim(),
-      delivery_status: mode === 'shipped' ? '已发货' : undefined,
-      exclude_shipped: mode === 'active'
+      delivery_status: mode === 'active' ? ACTIVE_DELIVERY_STATUS_FILTER : mode === 'shipped' ? '已发货' : undefined
     })
   });
 

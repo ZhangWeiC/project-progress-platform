@@ -1242,6 +1242,14 @@ function normalizeDeliveryStatus(value: string | null | undefined): DeliveryStat
   return '其他';
 }
 
+function normalizeDeliveryStatuses(value: string | null | undefined) {
+  const statuses = String(value ?? '')
+    .split(',')
+    .map((item) => normalizeDeliveryStatus(item))
+    .filter((item): item is DeliveryStatus => Boolean(item));
+  return Array.from(new Set(statuses));
+}
+
 function normalizeDeliveryRemark(
   status: DeliveryStatus | null,
   remark: string | null | undefined,
@@ -1477,7 +1485,6 @@ type MatrixQuery = {
   page_size?: number;
   keyword?: string;
   delivery_status?: string;
-  exclude_shipped?: boolean;
 };
 
 export function getAllMatrix(user: CurrentUser, query: MatrixQuery = {}) {
@@ -1510,11 +1517,10 @@ export function getAllMatrix(user: CurrentUser, query: MatrixQuery = {}) {
 
 function filterMatrixProjects(projects: MatrixProject[], query: MatrixQuery) {
   const keyword = normalizeText(query.keyword)?.toLowerCase();
-  const deliveryStatus = normalizeDeliveryStatus(query.delivery_status);
+  const deliveryStatuses = normalizeDeliveryStatuses(query.delivery_status);
   return projects.filter((project) => {
     const projectDeliveryStatus = getMatrixProjectDeliveryStatus(project.id);
-    if (deliveryStatus && projectDeliveryStatus !== deliveryStatus) return false;
-    if (!deliveryStatus && query.exclude_shipped && projectDeliveryStatus === '已发货') return false;
+    if (deliveryStatuses.length > 0 && !deliveryStatuses.includes(projectDeliveryStatus)) return false;
     if (!keyword) return true;
     return matrixProjectMatchesKeyword(project, keyword, projectDeliveryStatus);
   });

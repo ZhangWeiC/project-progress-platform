@@ -51,8 +51,7 @@ export type MatrixQueryParams = {
   page?: number;
   page_size?: number;
   keyword?: string;
-  delivery_status?: string;
-  exclude_shipped?: boolean;
+  delivery_status?: string | string[];
 };
 
 export const fetchAllMatrix = (params: MatrixQueryParams = {}) => {
@@ -60,8 +59,8 @@ export const fetchAllMatrix = (params: MatrixQueryParams = {}) => {
   if (params.page) search.set('page', String(params.page));
   if (params.page_size) search.set('page_size', String(params.page_size));
   if (params.keyword?.trim()) search.set('keyword', params.keyword.trim());
-  if (params.delivery_status) search.set('delivery_status', params.delivery_status);
-  if (params.exclude_shipped) search.set('exclude_shipped', '1');
+  const deliveryStatus = Array.isArray(params.delivery_status) ? params.delivery_status.join(',') : params.delivery_status;
+  if (deliveryStatus) search.set('delivery_status', deliveryStatus);
   const query = search.toString();
   return apiGet<MatrixResponse>(`/api/cases/matrix${query ? `?${query}` : ''}`);
 };

@@ -223,8 +223,7 @@ app.get('/api/cases/matrix', async (request) => {
     page: z.coerce.number().int().min(1).optional(),
     page_size: z.coerce.number().int().min(1).max(100).optional(),
     keyword: z.string().trim().optional(),
-    delivery_status: z.string().trim().optional(),
-    exclude_shipped: z.coerce.boolean().optional()
+    delivery_status: z.string().trim().optional()
   }).parse(request.query);
   return getAllMatrix(user, query);
 });
