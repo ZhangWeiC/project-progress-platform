@@ -897,7 +897,7 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
     )
     .all(project.id) as MatrixItem[];
   const caseTasks = getMatrixTasks(project.id, null);
-  const children = items.map((item) => buildItemMatrixRow(project, item, caseTasks, templates, user));
+  const children = items.map((item) => buildItemMatrixRow(project, item, templates, user));
   const cells: Record<string, MatrixCell> = {
     case_name: {
       value: project.name,
@@ -913,7 +913,26 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
     open_exception_count: { value: project.open_exception_count }
   };
 
+  for (const task of caseTasks) {
+    const subtasks = getMatrixSubtasks(task.id);
+    for (const subtask of subtasks) {
+      const key = `${task.task_type}.${subtask.subtask_template_id}`;
+      if (!templates.some((template) => `${template.task_type}.${template.subtask_template_id}` === key)) continue;
+      cells[key] = {
+        value: subtask.progress,
+        status: subtask.status,
+        editable: canEditSubtask(user, subtask.id),
+        targetType: 'subtask',
+        targetId: subtask.id,
+        taskId: task.id,
+        ownerName: ownerLabel(subtask, task),
+        departmentName: task.department_name
+      };
+    }
+  }
+
   for (const template of templates) {
+    if (template.generation_scope === 'case') continue;
     const key = `${template.task_type}.${template.subtask_template_id}`;
     const childCells = children
       .map((child) => child.cells[key])
@@ -946,9 +965,8 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
   };
 }
 
-function buildItemMatrixRow(project: MatrixProject, item: MatrixItem, caseTasks: MatrixTask[], templates: MatrixTemplateColumn[], user: CurrentUser): MatrixRow {
+function buildItemMatrixRow(project: MatrixProject, item: MatrixItem, templates: MatrixTemplateColumn[], user: CurrentUser): MatrixRow {
   const itemTasks = getMatrixTasks(project.id, item.id);
-  const tasks = [...caseTasks, ...itemTasks];
   const cells: Record<string, MatrixCell> = {
     case_name: { value: '', ownerName: businessOwnerLabel(project.business_owner_name) },
     case_item_name: { value: item.name, status: item.status, aggregateCount: Math.round(item.progress) },
@@ -956,7 +974,7 @@ function buildItemMatrixRow(project: MatrixProject, item: MatrixItem, caseTasks:
     open_exception_count: { value: item.open_exception_count }
   };
 
-  for (const task of tasks) {
+  for (const task of itemTasks) {
     const subtasks = getMatrixSubtasks(task.id);
     for (const subtask of subtasks) {
       const key = `${task.task_type}.${subtask.subtask_template_id}`;
@@ -1080,13 +1098,8 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
     }))
   ];
 
-  const caseTasks = db
-    .prepare('SELECT * FROM case_task WHERE project_case_id = ? AND case_item_id IS NULL')
-    .all(projectCaseId) as Array<{ id: string; task_type: string; name: string; progress: number }>;
-
   const rows = items.map((item) => {
     const itemTasks = db.prepare('SELECT * FROM case_task WHERE case_item_id = ?').all(item.id) as Array<{ id: string; task_type: string; name: string; progress: number }>;
-    const tasks = [...caseTasks, ...itemTasks];
     const cells: Record<string, unknown> = {
       case_name: { value: projectCase.name },
       case_item_name: { value: item.name },
@@ -1100,7 +1113,7 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
       .get(item.id) as { count: number };
     cells.open_exception_count = { value: openExceptionCount.count };
 
-    for (const task of tasks) {
+    for (const task of itemTasks) {
       const subtasks = db.prepare('SELECT * FROM case_subtask WHERE case_task_id = ?').all(task.id) as Array<{ id: string; subtask_template_id: string; progress: number; status: string }>;
       for (const subtask of subtasks) {
         const key = `${task.task_type}.${subtask.subtask_template_id}`;
