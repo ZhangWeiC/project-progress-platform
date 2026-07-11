@@ -497,7 +497,7 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
     });
     syncProjectOwnerMembers(id, input.business_owner_id ?? null, input.business_owner_department_id ?? null, input.design_owner_id ?? null, input.design_owner_department_id ?? null);
     ensureProjectTasks(id, stageOwnerInputMap(input.stage_owners), input.design_owner_id ?? null);
-    syncCaseItems(id, input.items ?? [], stageOwnerInputMap(input.stage_owners));
+    syncCaseItems(id, input.items ?? [], stageOwnerInputMap(input.stage_owners), input.design_owner_id ?? null);
     if (input.stage_owners) applyStageOwners(id, input.stage_owners);
     syncTaskOwnerMembers(id);
     recalculateCase(id);
@@ -580,7 +580,7 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
     });
     syncProjectOwnerMembers(projectCaseId, nextBusinessOwnerId, nextBusinessOwnerDepartmentId, nextDesignOwnerId, nextDesignOwnerDepartmentId);
     ensureProjectTasks(projectCaseId, stageOwnerInputMap(input.stage_owners), nextDesignOwnerId);
-    syncCaseItems(projectCaseId, input.items, input.stage_owners ? stageOwnerInputMap(input.stage_owners) : getCurrentStageOwnerMap(projectCaseId));
+    syncCaseItems(projectCaseId, input.items, input.stage_owners ? stageOwnerInputMap(input.stage_owners) : getCurrentStageOwnerMap(projectCaseId), nextDesignOwnerId);
     if (input.stage_owners) {
       applyStageOwners(projectCaseId, input.stage_owners);
     } else {
@@ -731,7 +731,8 @@ function getProjectStageOwners(projectCaseId: string) {
      LEFT JOIN team tm ON tm.id = t.team_id
      LEFT JOIN department od ON od.id = t.owner_department_id
      WHERE t.project_case_id = ?
-       AND t.task_type = ?`
+       AND t.task_type = ?
+       AND t.is_applicable = 1`
   );
 
   return templates.map((template) => {
@@ -789,7 +790,7 @@ function syncProjectOwnerMembers(
   }
 }
 
-function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | undefined, stageOwners: Map<string, StageOwnerValue>) {
+function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | undefined, stageOwners: Map<string, StageOwnerValue>, fallbackDesignOwnerId: string | null) {
   if (!items) return;
   const existingItems = new Set(
     (db.prepare('SELECT id FROM case_item WHERE project_case_id = ?').all(projectCaseId) as Array<{ id: string }>).map((item) => item.id)
@@ -831,7 +832,7 @@ function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | un
         item.id
       );
       retainedItemIds.add(item.id);
-      ensureItemTasks(projectCaseId, item.id, stageOwners);
+      ensureItemTasks(projectCaseId, item.id, stageOwners, fallbackDesignOwnerId);
       continue;
     }
 
@@ -853,7 +854,7 @@ function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | un
       nextRow
     );
     retainedItemIds.add(itemId);
-    ensureItemTasks(projectCaseId, itemId, stageOwners);
+    ensureItemTasks(projectCaseId, itemId, stageOwners, fallbackDesignOwnerId);
   }
 
   for (const itemId of existingItems) {
@@ -957,7 +958,7 @@ function ensureProjectTasks(projectCaseId: string, stageOwners: Map<string, Stag
   }
 
   const items = db.prepare('SELECT id FROM case_item WHERE project_case_id = ?').all(projectCaseId) as Array<{ id: string }>;
-  for (const item of items) ensureItemTasks(projectCaseId, item.id, stageOwners);
+  for (const item of items) ensureItemTasks(projectCaseId, item.id, stageOwners, fallbackDesignOwnerId);
 }
 
 type TaskTemplateRow = {
@@ -967,12 +968,15 @@ type TaskTemplateRow = {
   default_owner_department_id: string | null;
 };
 
-function ensureItemTasks(projectCaseId: string, itemId: string, stageOwners: Map<string, StageOwnerValue>) {
+function ensureItemTasks(projectCaseId: string, itemId: string, stageOwners: Map<string, StageOwnerValue>, fallbackDesignOwnerId?: string | null) {
   const itemTemplates = db
     .prepare("SELECT * FROM task_template WHERE generation_scope = 'item' ORDER BY sort_order")
     .all() as Array<TaskTemplateRow>;
   for (const template of itemTemplates) {
-    ensureTaskWithSubtasks(projectCaseId, itemId, template, stageOwners.get(template.task_type) ?? { assignee_id: null, team_id: null, department_id: null });
+    const fallbackOwner = template.task_type === 'design'
+      ? { assignee_id: fallbackDesignOwnerId ?? null, team_id: null, department_id: null }
+      : { assignee_id: null, team_id: null, department_id: null };
+    ensureTaskWithSubtasks(projectCaseId, itemId, template, stageOwners.get(template.task_type) ?? fallbackOwner);
   }
 }
 
@@ -1050,7 +1054,8 @@ function syncTaskOwnerMembers(projectCaseId: string) {
     `SELECT DISTINCT t.task_type, t.assignee_id, t.owner_department_id, tm.leader_id as team_leader_id
      FROM case_task t
      LEFT JOIN team tm ON tm.id = t.team_id
-     WHERE t.project_case_id = ?`
+     WHERE t.project_case_id = ?
+       AND t.is_applicable = 1`
   ).all(projectCaseId) as Array<{ task_type: string; assignee_id: string | null; owner_department_id: string | null; team_leader_id: string | null }>;
   for (const owner of owners) {
     if (owner.assignee_id) insertProjectMember(projectCaseId, owner.assignee_id, `${owner.task_type}_owner`, 'stage_owner');
@@ -1066,8 +1071,8 @@ function syncProjectOwnerAssignments(projectCaseId: string, designOwnerId: strin
     `UPDATE case_task
      SET assignee_id = ?
      WHERE project_case_id = ?
-       AND case_item_id IS NULL
-       AND task_type = 'design'`
+       AND task_type = 'design'
+       AND is_applicable = 1`
   ).run(designOwnerId, projectCaseId);
   db.prepare(
     `UPDATE case_subtask
@@ -1075,8 +1080,8 @@ function syncProjectOwnerAssignments(projectCaseId: string, designOwnerId: strin
      WHERE case_task_id IN (
        SELECT id FROM case_task
        WHERE project_case_id = ?
-         AND case_item_id IS NULL
          AND task_type = 'design'
+         AND is_applicable = 1
      )`
   ).run(designOwnerId, projectCaseId);
 }
@@ -1800,6 +1805,7 @@ function getMatrixTasks(projectCaseId: string, itemId: string | null) {
        LEFT JOIN team tm ON tm.id = t.team_id
        LEFT JOIN department d ON d.id = t.owner_department_id
        WHERE t.project_case_id = ? AND ${itemCondition}
+         AND t.is_applicable = 1
        ORDER BY t.id`
     )
     .all(...(itemId === null ? [projectCaseId] : [projectCaseId, itemId])) as MatrixTask[];

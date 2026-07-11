@@ -388,42 +388,14 @@ function importProject(project: ParsedProject, sourceSheet: string) {
   ensureCaseMember(projectId, businessOwnerId, 'business_owner', 'import');
   ensureCaseMember(projectId, designOwnerId, 'design_owner', 'import');
   const drawingReviewProgress = project.drawingReviewProgress ?? 0;
-  const designTaskId = upsertCaseTask(
-    projectId,
-    null,
-    'tt-design',
-    '项目级',
-    'design',
-    'dept-design',
-    designOwnerId,
-    null,
-    drawingReviewProgress,
-    project.sourceRow,
-    null,
-    ''
-  );
-  upsertCaseSubtask({
-    id: `SUB-${projectId}-st-drawing-review`,
-    taskId: designTaskId,
-    templateId: 'st-drawing-review',
-    name: '图纸定审',
-    sortOrder: 10,
-    assigneeId: designOwnerId,
-    teamId: null,
-    progress: drawingReviewProgress,
-    plannedQuantity: null,
-    quantityUnit: null,
-    sourceColumn: 'F',
-    rawValue: String(project.drawingReviewProgress ?? '')
-  });
 
   for (const item of project.items) {
-    importItem(projectId, item);
+    importItem(projectId, item, designOwnerId, drawingReviewProgress, String(project.drawingReviewProgress ?? ''));
   }
   updateImportedProjectDeliverySummary(projectId);
 }
 
-function importItem(projectId: string, item: ParsedItem) {
+function importItem(projectId: string, item: ParsedItem, designOwnerId: string | null, drawingReviewProgress: number, drawingReviewRaw: string) {
   const existingItem = db
     .prepare('SELECT id FROM case_item WHERE project_case_id = ? AND source_row = ?')
     .get(projectId, item.sourceRow) as { id: string } | undefined;
@@ -460,6 +432,22 @@ function importItem(projectId: string, item: ParsedItem) {
     delivery_status: deliveryStatus,
     delivery_remark: deliveryRemark,
     source_row: item.sourceRow
+  });
+
+  const designTaskId = upsertCaseTask(projectId, itemId, 'tt-design', '设计', 'design', 'dept-design', designOwnerId, null, drawingReviewProgress, item.sourceRow, 'F', drawingReviewRaw);
+  upsertCaseSubtask({
+    id: `SUB-${itemId}-st-drawing-review`,
+    taskId: designTaskId,
+    templateId: 'st-drawing-review',
+    name: '图纸定审',
+    sortOrder: 10,
+    assigneeId: designOwnerId,
+    teamId: null,
+    progress: drawingReviewProgress,
+    plannedQuantity: null,
+    quantityUnit: null,
+    sourceColumn: 'F',
+    rawValue: drawingReviewRaw
   });
 
   for (const itemTask of item.tasks) {
