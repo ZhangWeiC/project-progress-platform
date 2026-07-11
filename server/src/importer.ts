@@ -392,7 +392,7 @@ function importProject(project: ParsedProject, sourceSheet: string) {
     projectId,
     null,
     'tt-design',
-    '设计',
+    '项目级',
     'design',
     'dept-design',
     designOwnerId,
