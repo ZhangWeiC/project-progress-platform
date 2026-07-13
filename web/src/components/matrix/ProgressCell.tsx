@@ -1,5 +1,6 @@
 import { EditOutlined, LockOutlined, WarningOutlined } from '@ant-design/icons';
 import { Button, Space, Tooltip } from 'antd';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import type { MatrixCell } from '../../types';
 
 type Props = {
@@ -30,13 +31,15 @@ export function ProgressCell({ cell, onOpenTask, onBulkEdit }: Props) {
           {formattedValue === null ? <span className="empty-cell">-</span> : <span className={valueClassName}>{formattedValue}</span>}
           {!editable && (
             <Tooltip title="当前用户不可编辑">
-              <LockOutlined className="muted-icon" />
+              <span {...tooltipHoverBoundaryProps()}>
+                <LockOutlined className="muted-icon" />
+              </span>
             </Tooltip>
           )}
         </Space>
         {owner && (
           <Tooltip title={owner}>
-            <span className="progress-owner">{owner}</span>
+            <span className="progress-owner" {...tooltipHoverBoundaryProps()}>{owner}</span>
           </Tooltip>
         )}
         {timing}
@@ -46,25 +49,27 @@ export function ProgressCell({ cell, onOpenTask, onBulkEdit }: Props) {
 
   if (cell.bulkTarget && value !== null) {
     return (
-      <Tooltip title={`批量更新 ${cell.bulkTarget.targetCount} 个子项目`}>
-        <Button
-          className="progress-cell"
-          type="text"
-          size="small"
-          onClick={() => onBulkEdit?.(cell)}
-        >
-          <Space size={4} className="progress-cell-main">
-            <span className={valueClassName}>{formattedValue}</span>
-            <EditOutlined className="muted-icon" />
-          </Space>
-          {owner && (
-            <Tooltip title={owner}>
-              <span className="progress-owner">{owner}</span>
-            </Tooltip>
-          )}
-          {timing}
-        </Button>
-      </Tooltip>
+      <Button
+        className="progress-cell"
+        type="text"
+        size="small"
+        onClick={() => onBulkEdit?.(cell)}
+      >
+        <Space size={4} className="progress-cell-main">
+          <span className={valueClassName}>{formattedValue}</span>
+          <Tooltip title={`批量更新 ${cell.bulkTarget.targetCount} 个子项目`}>
+            <span {...tooltipHoverBoundaryProps()}>
+              <EditOutlined className="muted-icon" />
+            </span>
+          </Tooltip>
+        </Space>
+        {owner && (
+          <Tooltip title={owner}>
+            <span className="progress-owner" {...tooltipHoverBoundaryProps()}>{owner}</span>
+          </Tooltip>
+        )}
+        {timing}
+      </Button>
     );
   }
 
@@ -74,7 +79,7 @@ export function ProgressCell({ cell, onOpenTask, onBulkEdit }: Props) {
         <span className={valueClassName}>{formattedValue}</span>
         {owner && (
           <Tooltip title={owner}>
-            <span className="progress-owner">{owner}</span>
+            <span className="progress-owner" {...tooltipHoverBoundaryProps()}>{owner}</span>
           </Tooltip>
         )}
         {timing}
@@ -121,7 +126,7 @@ function ProgressTiming({ cell }: { cell: MatrixCell }) {
   );
   return (
     <Tooltip title={title}>
-      <span className="progress-cell-time">
+      <span className="progress-cell-time" {...tooltipHoverBoundaryProps()}>
         <span>始 {start}</span>
         <span>完 {finish}</span>
       </span>
@@ -145,4 +150,15 @@ function formatFullDateTime(value: string | null | undefined) {
 
 function pad(value: number) {
   return String(value).padStart(2, '0');
+}
+
+function tooltipHoverBoundaryProps() {
+  return {
+    onMouseEnter: stopTooltipHover,
+    onMouseOver: stopTooltipHover
+  };
+}
+
+function stopTooltipHover(event: ReactMouseEvent<HTMLElement>) {
+  event.stopPropagation();
 }
