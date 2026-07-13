@@ -4,7 +4,6 @@ import { CaseMatrixPage } from '../pages/cases/CaseMatrixPage';
 import { WorkLogsPage } from '../pages/work-logs/WorkLogsPage';
 import { ProductionPlansPage } from '../pages/production-plans/ProductionPlansPage';
 import { ExceptionsPage } from '../pages/exceptions/ExceptionsPage';
-import { ImportsPage } from '../pages/imports/ImportsPage';
 import { ReportsPage } from '../pages/reports/ReportsPage';
 import { SettingsPage } from '../pages/settings/SettingsPage';
 import { MobileShell } from '../pages/mobile/MobileShell';
@@ -42,7 +41,7 @@ export const router = createBrowserRouter([
       { path: 'production-plans', element: <ProductionPlansPage /> },
       { path: 'work-logs', element: <WorkLogsPage /> },
       { path: 'exceptions', element: <ExceptionsPage /> },
-      { path: 'imports', element: <ImportsPage /> },
+      { path: 'imports', element: <Navigate to="/cases" replace /> },
       { path: 'reports', element: <ReportsPage /> },
       { path: 'settings/:section?', element: <AdminOnly><SettingsPage /></AdminOnly> }
     ]

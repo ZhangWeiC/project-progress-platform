@@ -25,7 +25,6 @@ export function DashboardPage() {
           业务工作台
         </Typography.Title>
         <Space>
-          <Button onClick={() => navigate('/imports')}>导入 Excel</Button>
           <Button type="primary" onClick={() => navigate('/cases')}>查看进度总表</Button>
         </Space>
       </div>

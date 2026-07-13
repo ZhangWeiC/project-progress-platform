@@ -30,7 +30,6 @@ import {
   updateProjectCase,
   updateProjectMonthOrder
 } from './services.js';
-import { confirmExcelImport, createExcelImport, getImportPreview } from './importer.js';
 import { login, logout } from './auth.js';
 import {
   buildFeishuAuthorizeUrl,
@@ -748,27 +747,31 @@ app.get('/api/workflow-template', async () => {
   };
 });
 
-app.post('/api/import-tasks', async (request) => {
-  const user = getCurrentUser(request.headers);
-  const file = await request.file();
-  if (!file) {
-    const err = new Error('请选择要导入的 Excel 文件');
-    err.name = 'VALIDATION_ERROR';
-    throw err;
-  }
-  const buffer = await file.toBuffer();
-  return createExcelImport(buffer, file.filename, user.id);
+app.post('/api/import-tasks', async (request, reply) => {
+  getCurrentUser(request.headers);
+  return reply.status(410).send({
+    code: 'FEATURE_DISABLED',
+    message: 'Excel 导入功能已下线，历史数据已完成迁移，请直接在平台内维护项目。',
+    details: {}
+  });
 });
 
-app.get('/api/import-tasks/:id/preview', async (request) => {
-  const { id } = z.object({ id: z.string() }).parse(request.params);
-  return getImportPreview(id);
+app.get('/api/import-tasks/:id/preview', async (request, reply) => {
+  getCurrentUser(request.headers);
+  return reply.status(410).send({
+    code: 'FEATURE_DISABLED',
+    message: 'Excel 导入功能已下线，历史数据已完成迁移，请直接在平台内维护项目。',
+    details: {}
+  });
 });
 
-app.post('/api/import-tasks/:id/confirm', async (request) => {
-  const user = getCurrentUser(request.headers);
-  const { id } = z.object({ id: z.string() }).parse(request.params);
-  return confirmExcelImport(id, user.id);
+app.post('/api/import-tasks/:id/confirm', async (request, reply) => {
+  getCurrentUser(request.headers);
+  return reply.status(410).send({
+    code: 'FEATURE_DISABLED',
+    message: 'Excel 导入功能已下线，历史数据已完成迁移，请直接在平台内维护项目。',
+    details: {}
+  });
 });
 
 type WorkbenchTask = {
