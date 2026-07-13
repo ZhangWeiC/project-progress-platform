@@ -129,6 +129,71 @@ body {
   background: #fff;
 }
 
+.project-order-list {
+  max-height: min(58vh, 520px);
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid #edf0f5;
+  border-radius: 6px;
+  background: #fafbfc;
+}
+
+.project-order-empty {
+  padding: 32px 12px;
+  color: #8c8c8c;
+  text-align: center;
+}
+
+.project-order-item {
+  display: grid;
+  grid-template-columns: 32px 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 8px 10px;
+  border: 1px solid #edf0f5;
+  border-radius: 6px;
+  background: #fff;
+  cursor: grab;
+}
+
+.project-order-item + .project-order-item {
+  margin-top: 8px;
+}
+
+.project-order-item.is-dragging {
+  border-color: #91caff;
+  background: #f0f7ff;
+  opacity: 0.72;
+}
+
+.project-order-index,
+.project-order-handle {
+  color: #8c8c8c;
+  text-align: center;
+}
+
+.project-order-main {
+  min-width: 0;
+}
+
+.project-order-name {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-order-meta {
+  margin-top: 2px;
+  color: #8c8c8c;
+}
+
+.project-order-status {
+  margin-inline-end: 0;
+}
+
 .matrix-card .ant-table {
   font-size: 12px;
 }

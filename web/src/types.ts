@@ -56,6 +56,29 @@ export type MatrixResponse = {
   };
 };
 
+export type ProjectOrderItem = {
+  id: string;
+  code?: string | null;
+  name: string;
+  associated_month?: string | null;
+  business_owner_name?: string | null;
+  delivery_status?: string | null;
+  item_count: number;
+  month_sort_order?: number | null;
+  source_seq?: number | null;
+};
+
+export type ProjectMonthOrderGroup = {
+  associated_month: string | null;
+  month_key: string;
+  label: string;
+  projects: ProjectOrderItem[];
+};
+
+export type ProjectMonthOrderResponse = {
+  months: ProjectMonthOrderGroup[];
+};
+
 export type ProjectCase = {
   id: string;
   code?: string | null;

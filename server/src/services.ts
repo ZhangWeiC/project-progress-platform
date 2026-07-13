@@ -1,4 +1,4 @@
-import { db, makeId, nowIso, TargetType } from './db.js';
+import { db, makeId, nextProjectMonthSortOrder, nowIso, TargetType } from './db.js';
 import { authenticate } from './auth.js';
 
 export type CurrentUser = {
@@ -560,11 +560,12 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
   const deliveryStatus = normalizeDeliveryStatus(input.delivery_status);
   const deliveryRemark = normalizeDeliveryRemark(deliveryStatus, input.delivery_remark, input.delivery_status);
   const associatedMonth = normalizeAssociatedMonth(input.associated_month, deliveryDate);
+  const monthSortOrder = nextProjectMonthSortOrder(associatedMonth);
   const tx = db.transaction(() => {
     db.prepare(
       `INSERT INTO project_case
-       (id, code, name, category, customer_name, business_owner_id, business_owner_department_id, design_owner_id, design_owner_department_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, delivery_remark, associated_month, source_sheet, source_row, source_seq)
-       VALUES (@id, @code, @name, @category, @customer_name, @business_owner_id, @business_owner_department_id, @design_owner_id, @design_owner_department_id, @estimated_weight, 'T', 'in_progress', 0, @delivery_date, @delivery_status, @delivery_remark, @associated_month, 'manual', null, @source_seq)`
+       (id, code, name, category, customer_name, business_owner_id, business_owner_department_id, design_owner_id, design_owner_department_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, delivery_remark, associated_month, month_sort_order, source_sheet, source_row, source_seq)
+       VALUES (@id, @code, @name, @category, @customer_name, @business_owner_id, @business_owner_department_id, @design_owner_id, @design_owner_department_id, @estimated_weight, 'T', 'in_progress', 0, @delivery_date, @delivery_status, @delivery_remark, @associated_month, @month_sort_order, 'manual', null, @source_seq)`
     ).run({
       id,
       code: normalizeText(input.code),
@@ -580,6 +581,7 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
       delivery_status: deliveryStatus,
       delivery_remark: deliveryRemark,
       associated_month: associatedMonth,
+      month_sort_order: monthSortOrder,
       source_seq: Number(maxSeq.value ?? 0) + 1
     });
     syncProjectOwnerMembers(id, input.business_owner_id ?? null, input.business_owner_department_id ?? null, input.design_owner_id ?? null, input.design_owner_department_id ?? null);
@@ -605,7 +607,7 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
   validateSingleOwnerTarget(input.design_owner_id, input.design_owner_department_id, '设计负责人');
   validateStageOwners(input.stage_owners);
   const existing = db.prepare('SELECT * FROM project_case WHERE id = ?').get(projectCaseId) as
-    | (ProjectCaseInput & { id: string })
+    | (ProjectCaseInput & { id: string; month_sort_order?: number | null })
     | undefined;
   if (!existing) {
     const err = new Error('项目不存在');
@@ -632,6 +634,9 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
   const nextAssociatedMonth = input.associated_month === undefined
     ? normalizeAssociatedMonth(existing.associated_month, nextDeliveryDate)
     : normalizeAssociatedMonth(input.associated_month, nextDeliveryDate);
+  const nextMonthSortOrder = nextAssociatedMonth !== (existing.associated_month ?? null)
+    ? nextProjectMonthSortOrder(nextAssociatedMonth)
+    : existing.month_sort_order ?? nextProjectMonthSortOrder(nextAssociatedMonth);
   const tx = db.transaction(() => {
     db.prepare(
       `UPDATE project_case
@@ -647,7 +652,8 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
            delivery_date = @delivery_date,
            delivery_status = @delivery_status,
            delivery_remark = @delivery_remark,
-           associated_month = @associated_month
+           associated_month = @associated_month,
+           month_sort_order = @month_sort_order
        WHERE id = @id`
     ).run({
       id: projectCaseId,
@@ -663,7 +669,8 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
       delivery_date: nextDeliveryDate,
       delivery_status: nextDeliveryStatus,
       delivery_remark: nextDeliveryRemark,
-      associated_month: nextAssociatedMonth
+      associated_month: nextAssociatedMonth,
+      month_sort_order: nextMonthSortOrder
     });
     syncProjectOwnerMembers(projectCaseId, nextBusinessOwnerId, nextBusinessOwnerDepartmentId, nextDesignOwnerId, nextDesignOwnerDepartmentId);
     ensureProjectTasks(projectCaseId, stageOwnerInputMap(input.stage_owners), nextDesignOwnerId);
@@ -733,6 +740,78 @@ export function deleteProjectCaseItem(projectCaseId: string, itemId: string, use
   });
   tx();
   return { ok: true };
+}
+
+export function getProjectMonthOrder(user: CurrentUser) {
+  assertCanManageProjects(user);
+  const rows = db.prepare(
+    `SELECT pc.id, pc.code, pc.name, pc.associated_month, pc.month_sort_order, pc.source_seq,
+            pc.delivery_status, COALESCE(b.name, bd.name) as business_owner_name,
+            (SELECT COUNT(*) FROM case_item ci WHERE ci.project_case_id = pc.id) as item_count
+     FROM project_case pc
+     LEFT JOIN employee b ON b.id = pc.business_owner_id
+     LEFT JOIN department bd ON bd.id = pc.business_owner_department_id
+     ORDER BY pc.associated_month DESC, pc.month_sort_order ASC, pc.source_seq DESC, pc.id DESC`
+  ).all() as Array<{
+    id: string;
+    code: string | null;
+    name: string;
+    associated_month: string | null;
+    month_sort_order: number | null;
+    source_seq: number | null;
+    delivery_status: string | null;
+    business_owner_name: string | null;
+    item_count: number;
+  }>;
+
+  const groups = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const month = row.associated_month ?? '未分类';
+    groups.set(month, [...(groups.get(month) ?? []), row]);
+  }
+
+  return {
+    months: Array.from(groups.entries())
+      .sort(([left], [right]) => compareAssociatedMonthDesc(left, right))
+      .map(([month, projects]) => ({
+        associated_month: month === '未分类' ? null : month,
+        month_key: month,
+        label: formatAssociatedMonth(month),
+        projects
+      }))
+  };
+}
+
+export function updateProjectMonthOrder(user: CurrentUser, associatedMonth: string | null | undefined, projectIds: string[]) {
+  assertCanManageProjects(user);
+  const normalizedMonth = normalizeText(associatedMonth) ? normalizeAssociatedMonth(associatedMonth, null) : null;
+  const uniqueIds = new Set(projectIds);
+  if (uniqueIds.size !== projectIds.length) {
+    const err = new Error('项目顺序中存在重复项目');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+
+  const projects = db.prepare(
+    `SELECT id
+     FROM project_case
+     WHERE COALESCE(associated_month, '未分类') = COALESCE(?, '未分类')
+     ORDER BY month_sort_order ASC, source_seq DESC, id DESC`
+  ).all(normalizedMonth) as Array<{ id: string }>;
+  const existingIds = new Set(projects.map((project) => project.id));
+  const hasSameProjectSet = projectIds.length === projects.length && projectIds.every((id) => existingIds.has(id));
+  if (!hasSameProjectSet) {
+    const err = new Error('只能调整同一关联年月内的全部项目顺序');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+
+  const update = db.prepare('UPDATE project_case SET month_sort_order = ? WHERE id = ?');
+  const tx = db.transaction((ids: string[]) => {
+    ids.forEach((id, index) => update.run((index + 1) * 10, id));
+  });
+  tx(projectIds);
+  return { ok: true, associated_month: normalizedMonth, updated_count: projectIds.length };
 }
 
 export function updateDeliveryInfo(input: DeliveryInfoInput, user: CurrentUser) {
@@ -1689,7 +1768,7 @@ function getVisibleMatrixProjects(user: CurrentUser) {
                LEFT JOIN department bd ON bd.id = pc.business_owner_department_id
                LEFT JOIN employee de ON de.id = pc.design_owner_id
                LEFT JOIN department dd ON dd.id = pc.design_owner_department_id
-               ORDER BY pc.associated_month DESC, pc.source_seq, pc.id`;
+               ORDER BY pc.associated_month DESC, pc.month_sort_order ASC, pc.source_seq DESC, pc.id DESC`;
   const projects = db.prepare(sql).all() as MatrixProject[];
   if (canManageProjects(user)) return projects;
   return projects.filter((project) => canAccessCaseByOwner(user, project.id));

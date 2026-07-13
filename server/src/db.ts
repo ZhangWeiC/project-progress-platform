@@ -117,6 +117,7 @@ export function initializeDatabase() {
       delivery_status TEXT,
       delivery_remark TEXT,
       associated_month TEXT,
+      month_sort_order INTEGER,
       source_sheet TEXT,
       source_row INTEGER,
       source_seq INTEGER,
@@ -400,6 +401,7 @@ export function initializeDatabase() {
   migratePermissionModel();
   migrateFeishuIdentityColumns();
   migrateProjectAssociatedMonth();
+  migrateProjectMonthSortOrder();
   migrateDeliveryStatusModel();
   migrateProjectBulkProgressConfig();
   seedDatabase();
@@ -696,6 +698,30 @@ function migrateProjectAssociatedMonth() {
   tx(rows);
 }
 
+function migrateProjectMonthSortOrder() {
+  addColumnIfMissing('project_case', 'month_sort_order', 'INTEGER');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_project_case_month_order ON project_case(associated_month, month_sort_order)');
+  const monthRows = db
+    .prepare("SELECT DISTINCT COALESCE(associated_month, '未分类') as month_key FROM project_case WHERE month_sort_order IS NULL")
+    .all() as Array<{ month_key: string }>;
+  const update = db.prepare('UPDATE project_case SET month_sort_order = ? WHERE id = ?');
+  const tx = db.transaction((months: typeof monthRows) => {
+    for (const month of months) {
+      const projects = db
+        .prepare(
+          `SELECT id
+           FROM project_case
+           WHERE COALESCE(associated_month, '未分类') = ?
+             AND month_sort_order IS NULL
+           ORDER BY COALESCE(source_seq, 0) DESC, id DESC`
+        )
+        .all(month.month_key) as Array<{ id: string }>;
+      projects.forEach((project, index) => update.run((index + 1) * 10, project.id));
+    }
+  });
+  tx(monthRows);
+}
+
 function migrateDeliveryStatusModel() {
   addColumnIfMissing('project_case', 'delivery_remark', 'TEXT');
   addColumnIfMissing('case_item', 'delivery_remark', 'TEXT');
@@ -830,8 +856,8 @@ function seedDatabase() {
   if (existing.count > 0 || !shouldSeedDemoData()) return;
 
   insertMany('project_case', [
-    { id: 'CASE-202604-001', code: 'P-001', name: '惠增一标20M小箱梁中梁旧模板改造', category: '旧模板改造', customer_name: '', business_owner_id: 'user-zhang', design_owner_id: 'user-wei-li', estimated_weight: 15, weight_unit: 'T', status: 'completed', total_progress: 100, delivery_date: '2026-04-09', delivery_status: '已发货', delivery_remark: null, associated_month: '2026-04', source_sheet: '总表', source_row: 9, source_seq: 1 },
-    { id: 'CASE-202604-002', code: 'P-002', name: '狮子洋通道工程3标护栏模板', category: '护栏模板', customer_name: '', business_owner_id: 'user-zhang', design_owner_id: 'user-rao', estimated_weight: 20, weight_unit: 'T', status: 'in_progress', total_progress: 86, delivery_date: '2026-04-23', delivery_status: '其他', delivery_remark: '部分待确认', associated_month: '2026-04', source_sheet: '总表', source_row: 19, source_seq: 2 }
+    { id: 'CASE-202604-001', code: 'P-001', name: '惠增一标20M小箱梁中梁旧模板改造', category: '旧模板改造', customer_name: '', business_owner_id: 'user-zhang', design_owner_id: 'user-wei-li', estimated_weight: 15, weight_unit: 'T', status: 'completed', total_progress: 100, delivery_date: '2026-04-09', delivery_status: '已发货', delivery_remark: null, associated_month: '2026-04', month_sort_order: 20, source_sheet: '总表', source_row: 9, source_seq: 1 },
+    { id: 'CASE-202604-002', code: 'P-002', name: '狮子洋通道工程3标护栏模板', category: '护栏模板', customer_name: '', business_owner_id: 'user-zhang', design_owner_id: 'user-rao', estimated_weight: 20, weight_unit: 'T', status: 'in_progress', total_progress: 86, delivery_date: '2026-04-23', delivery_status: '其他', delivery_remark: '部分待确认', associated_month: '2026-04', month_sort_order: 10, source_sheet: '总表', source_row: 19, source_seq: 2 }
   ]);
 
   insertMany('case_item', [
@@ -1493,4 +1519,15 @@ export function nowIso() {
 
 export function makeId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
+}
+
+export function nextProjectMonthSortOrder(associatedMonth: string | null | undefined) {
+  const row = db
+    .prepare(
+      `SELECT MIN(month_sort_order) as value
+       FROM project_case
+       WHERE COALESCE(associated_month, '未分类') = COALESCE(?, '未分类')`
+    )
+    .get(associatedMonth ?? null) as { value: number | null } | undefined;
+  return row?.value === null || row?.value === undefined ? 10 : Number(row.value) - 10;
 }

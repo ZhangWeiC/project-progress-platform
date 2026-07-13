@@ -1,5 +1,5 @@
 import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from './api';
-import type { ExceptionRecord, ImportTaskPreview, LookupResponse, MatrixResponse, ProjectCase, TaskDetails, WorkflowTemplate, WorkbenchResponse, WorkbenchTask, WorkLogEntry, WorkLogPlanItem } from '../types';
+import type { ExceptionRecord, ImportTaskPreview, LookupResponse, MatrixResponse, ProjectCase, ProjectMonthOrderResponse, TaskDetails, WorkflowTemplate, WorkbenchResponse, WorkbenchTask, WorkLogEntry, WorkLogPlanItem } from '../types';
 
 export const fetchCases = () => apiGet<ProjectCase[]>('/api/cases');
 
@@ -29,6 +29,11 @@ export const fetchProjectCaseManageProfile = (caseId: string) =>
 
 export const updateProjectCase = (caseId: string, payload: ProjectCasePayload) =>
   apiPatch<ProjectCase>(`/api/cases/${caseId}`, payload);
+
+export const fetchProjectMonthOrder = () => apiGet<ProjectMonthOrderResponse>('/api/cases/month-order');
+
+export const updateProjectMonthOrder = (payload: { associated_month?: string | null; project_ids: string[] }) =>
+  apiPatch<{ ok: boolean; updated_count: number }>('/api/cases/month-order', payload);
 
 export type DeliveryInfoPayload = {
   project_case_id: string;

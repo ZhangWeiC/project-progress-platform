@@ -19,6 +19,7 @@ import {
   getProductionPlanBoard,
   getProductionPlanItemDetails,
   getProjectCaseManageProfile,
+  getProjectMonthOrder,
   getTaskDetails,
   getWorkSummaryReport,
   getWorkLogPlanItems,
@@ -26,7 +27,8 @@ import {
   updateProductionPlanItem,
   updateDeliveryInfo,
   updateProgress,
-  updateProjectCase
+  updateProjectCase,
+  updateProjectMonthOrder
 } from './services.js';
 import { confirmExcelImport, createExcelImport, getImportPreview } from './importer.js';
 import { login, logout } from './auth.js';
@@ -122,7 +124,7 @@ app.get('/api/cases', async (request) => {
        LEFT JOIN department bd ON bd.id = pc.business_owner_department_id
        LEFT JOIN employee d ON d.id = pc.design_owner_id
        LEFT JOIN department dd ON dd.id = pc.design_owner_department_id
-       ORDER BY pc.associated_month DESC, pc.source_seq`
+       ORDER BY pc.associated_month DESC, pc.month_sort_order ASC, pc.source_seq DESC, pc.id DESC`
     ).all();
   }
   return db.prepare(
@@ -138,7 +140,7 @@ app.get('/api/cases', async (request) => {
        WHERE m.project_case_id = pc.id
          AND m.user_id = ?
      )
-     ORDER BY pc.associated_month DESC, pc.source_seq`
+     ORDER BY pc.associated_month DESC, pc.month_sort_order ASC, pc.source_seq DESC, pc.id DESC`
   ).all(user.id);
 });
 
@@ -185,6 +187,21 @@ const deliveryInfoBody = z.object({
   delivery_date: z.string().trim().nullable().optional(),
   delivery_status: z.string().trim().nullable().optional(),
   delivery_remark: z.string().trim().nullable().optional()
+});
+const projectMonthOrderBody = z.object({
+  associated_month: z.string().trim().nullable().optional(),
+  project_ids: z.array(z.string().trim().min(1)).min(1)
+});
+
+app.get('/api/cases/month-order', async (request) => {
+  const user = getCurrentUser(request.headers);
+  return getProjectMonthOrder(user);
+});
+
+app.patch('/api/cases/month-order', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const body = projectMonthOrderBody.parse(request.body);
+  return updateProjectMonthOrder(user, body.associated_month ?? null, body.project_ids);
 });
 
 app.post('/api/cases', async (request) => {

@@ -1,4 +1,4 @@
-import { CompressOutlined, DeleteOutlined, ExpandAltOutlined, MinusOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import { CompressOutlined, DeleteOutlined, ExpandAltOutlined, HolderOutlined, MenuOutlined, MinusOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { Button, Card, Divider, Form, Input, InputNumber, Modal, Pagination, Popconfirm, Select, Space, Table, Tag, Tooltip, TreeSelect, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -6,10 +6,10 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Key, MouseEvent } from 'react';
 import { TaskDrawer } from '../../components/drawers/TaskDrawer';
 import { ProgressCell } from '../../components/matrix/ProgressCell';
-import { createProjectCase, deleteProjectCase, deleteProjectCaseItem, fetchAllMatrix, fetchLookups, fetchProjectCaseManageProfile, updateDeliveryInfo, updateProjectBulkSubtaskProgress, updateProjectCase } from '../../services/cases';
+import { createProjectCase, deleteProjectCase, deleteProjectCaseItem, fetchAllMatrix, fetchLookups, fetchProjectCaseManageProfile, fetchProjectMonthOrder, updateDeliveryInfo, updateProjectBulkSubtaskProgress, updateProjectCase, updateProjectMonthOrder } from '../../services/cases';
 import type { ProjectCasePayload } from '../../services/cases';
 import { getAuthSession } from '../../services/auth';
-import type { LookupResponse, MatrixCell, MatrixColumn, MatrixRow, ProjectCase, ProjectStageOwner } from '../../types';
+import type { LookupResponse, MatrixCell, MatrixColumn, MatrixRow, ProjectCase, ProjectMonthOrderGroup, ProjectOrderItem, ProjectStageOwner } from '../../types';
 
 const STAGE_COLORS = ['blue', 'cyan', 'green', 'lime', 'gold', 'orange', 'purple'];
 const DELIVERY_STATUS_OPTIONS = [
@@ -73,6 +73,10 @@ export function CaseMatrixPage() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [bulkProgressEditor, setBulkProgressEditor] = useState<BulkProgressEditorTarget | null>(null);
   const [bulkProgressValue, setBulkProgressValue] = useState(0);
+  const [projectOrderModalOpen, setProjectOrderModalOpen] = useState(false);
+  const [projectOrderMonthKey, setProjectOrderMonthKey] = useState<string>();
+  const [orderedProjects, setOrderedProjects] = useState<ProjectOrderItem[]>([]);
+  const [draggingProjectId, setDraggingProjectId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const watchedDeliveryStatus = Form.useWatch('delivery_status', deliveryForm);
   const currentUser = getAuthSession()?.user;
@@ -89,8 +93,18 @@ export function CaseMatrixPage() {
     })
   });
   const lookupsQuery = useQuery({ queryKey: ['lookups'], queryFn: fetchLookups, enabled: canManageProjects });
+  const projectOrderQuery = useQuery({
+    queryKey: ['project-month-order'],
+    queryFn: fetchProjectMonthOrder,
+    enabled: projectOrderModalOpen && canManageProjectBasics
+  });
 
   const rows = matrixQuery.data?.rows ?? [];
+  const projectOrderMonths = useMemo(() => projectOrderQuery.data?.months ?? [], [projectOrderQuery.data]);
+  const selectedOrderMonth = useMemo(
+    () => projectOrderMonths.find((month) => month.month_key === projectOrderMonthKey) ?? projectOrderMonths[0] ?? null,
+    [projectOrderMonthKey, projectOrderMonths]
+  );
   const projectRowKeys = useMemo(() => rows.filter((row) => row.row_type === 'project').map((row) => row.row_id ?? row.case_item_id), [rows]);
   const stageDefinitions = useMemo(() => stageDefinitionsFromColumns(matrixQuery.data?.columns ?? []), [matrixQuery.data?.columns]);
 
@@ -110,7 +124,8 @@ export function CaseMatrixPage() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['matrix', 'all'] }),
       queryClient.invalidateQueries({ queryKey: ['cases'] }),
-      queryClient.invalidateQueries({ queryKey: ['workbench'] })
+      queryClient.invalidateQueries({ queryKey: ['workbench'] }),
+      queryClient.invalidateQueries({ queryKey: ['project-month-order'] })
     ]);
   };
 
@@ -170,6 +185,34 @@ export function CaseMatrixPage() {
     },
     onError: (error) => message.error(error.message)
   });
+  const projectOrderMutation = useMutation({
+    mutationFn: updateProjectMonthOrder,
+    onSuccess: async (result) => {
+      message.success(`已更新 ${result.updated_count} 个项目的顺序`);
+      setProjectOrderModalOpen(false);
+      setDraggingProjectId(null);
+      await refreshProjectQueries();
+    },
+    onError: (error) => message.error(error.message)
+  });
+
+  useEffect(() => {
+    if (!projectOrderModalOpen) return;
+    if (!projectOrderMonths.length) {
+      setProjectOrderMonthKey(undefined);
+      setOrderedProjects([]);
+      return;
+    }
+    if (!projectOrderMonthKey || !projectOrderMonths.some((month) => month.month_key === projectOrderMonthKey)) {
+      setProjectOrderMonthKey(projectOrderMonths[0].month_key);
+    }
+  }, [projectOrderModalOpen, projectOrderMonthKey, projectOrderMonths]);
+
+  useEffect(() => {
+    if (!projectOrderModalOpen) return;
+    const month = projectOrderMonths.find((item) => item.month_key === projectOrderMonthKey);
+    setOrderedProjects(month?.projects ?? []);
+  }, [projectOrderModalOpen, projectOrderMonthKey, projectOrderMonths]);
 
   const openCreateProject = () => {
     if (!canManageProjectBasics) return;
@@ -247,6 +290,29 @@ export function CaseMatrixPage() {
       progress
     });
   };
+  const openProjectOrderModal = () => {
+    if (!canManageProjectBasics) return;
+    setProjectOrderModalOpen(true);
+  };
+  const moveProjectOrder = (dragId: string, targetId: string) => {
+    if (dragId === targetId) return;
+    setOrderedProjects((current) => {
+      const fromIndex = current.findIndex((project) => project.id === dragId);
+      const toIndex = current.findIndex((project) => project.id === targetId);
+      if (fromIndex < 0 || toIndex < 0) return current;
+      const next = [...current];
+      const [dragged] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, dragged);
+      return next;
+    });
+  };
+  const saveProjectOrder = () => {
+    if (!selectedOrderMonth || orderedProjects.length === 0) return;
+    projectOrderMutation.mutate({
+      associated_month: selectedOrderMonth.associated_month,
+      project_ids: orderedProjects.map((project) => project.id)
+    });
+  };
 
   const tableColumns = useMemo(
     () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjects, canManageProjectBasics, openDeliveryEditor, openEditProject, openBulkProgressEditor),
@@ -296,9 +362,14 @@ export function CaseMatrixPage() {
               刷新
             </Button>
             {canManageProjectBasics && (
-              <Button type="primary" icon={<PlusOutlined />} onClick={openCreateProject}>
-                新增项目
-              </Button>
+              <>
+                <Button icon={<MenuOutlined />} onClick={openProjectOrderModal}>
+                  调整顺序
+                </Button>
+                <Button type="primary" icon={<PlusOutlined />} onClick={openCreateProject}>
+                  新增项目
+                </Button>
+              </>
             )}
           </Space>
         </div>
@@ -370,6 +441,27 @@ export function CaseMatrixPage() {
         taskId={openedTaskId}
         open={Boolean(openedTaskId)}
         onClose={() => setOpenedTaskId(undefined)}
+      />
+      <ProjectOrderModal
+        open={projectOrderModalOpen}
+        months={projectOrderMonths}
+        selectedMonthKey={selectedOrderMonth?.month_key}
+        projects={orderedProjects}
+        loading={projectOrderQuery.isLoading}
+        saving={projectOrderMutation.isPending}
+        draggingProjectId={draggingProjectId}
+        onMonthChange={setProjectOrderMonthKey}
+        onDragStart={setDraggingProjectId}
+        onDrop={(targetId) => {
+          if (draggingProjectId) moveProjectOrder(draggingProjectId, targetId);
+          setDraggingProjectId(null);
+        }}
+        onDragEnd={() => setDraggingProjectId(null)}
+        onCancel={() => {
+          setProjectOrderModalOpen(false);
+          setDraggingProjectId(null);
+        }}
+        onSave={saveProjectOrder}
       />
       <Modal
         title={`批量更新进度 - ${bulkProgressEditor?.title ?? ''}`}
@@ -545,6 +637,118 @@ function MatrixExpandIcon({
         </Popconfirm>
       )}
     </span>
+  );
+}
+
+type ProjectOrderModalProps = {
+  open: boolean;
+  months: ProjectMonthOrderGroup[];
+  selectedMonthKey?: string;
+  projects: ProjectOrderItem[];
+  loading: boolean;
+  saving: boolean;
+  draggingProjectId: string | null;
+  onMonthChange: (monthKey: string) => void;
+  onDragStart: (projectId: string) => void;
+  onDrop: (targetProjectId: string) => void;
+  onDragEnd: () => void;
+  onCancel: () => void;
+  onSave: () => void;
+};
+
+function ProjectOrderModal({
+  open,
+  months,
+  selectedMonthKey,
+  projects,
+  loading,
+  saving,
+  draggingProjectId,
+  onMonthChange,
+  onDragStart,
+  onDrop,
+  onDragEnd,
+  onCancel,
+  onSave
+}: ProjectOrderModalProps) {
+  return (
+    <Modal
+      title="调整项目顺序"
+      open={open}
+      width={720}
+      onCancel={onCancel}
+      onOk={onSave}
+      okText="保存顺序"
+      confirmLoading={saving}
+      okButtonProps={{ disabled: loading || projects.length === 0 }}
+      destroyOnClose
+    >
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Typography.Text type="secondary">
+          仅调整所选年月内的项目顺序，拖拽后保存即可更新进度总表展示顺序。
+        </Typography.Text>
+        <Select
+          loading={loading}
+          value={selectedMonthKey}
+          placeholder="选择关联年月"
+          options={months.map((month) => ({
+            label: `${month.label}（${month.projects.length} 项目）`,
+            value: month.month_key
+          }))}
+          onChange={onMonthChange}
+          style={{ width: 260 }}
+        />
+        <div className="project-order-list">
+          {projects.length === 0 ? (
+            <div className="project-order-empty">暂无可调整项目</div>
+          ) : (
+            projects.map((project, index) => (
+              <div
+                key={project.id}
+                className={['project-order-item', draggingProjectId === project.id ? 'is-dragging' : ''].filter(Boolean).join(' ')}
+                draggable
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = 'move';
+                  event.dataTransfer.setData('text/plain', project.id);
+                  onDragStart(project.id);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  onDrop(project.id);
+                }}
+                onDragEnd={onDragEnd}
+              >
+                <span className="project-order-index">{index + 1}</span>
+                <span className="project-order-handle" aria-hidden="true">
+                  <HolderOutlined />
+                </span>
+                <div className="project-order-main">
+                  <Tooltip title={project.name}>
+                    <Typography.Text strong className="project-order-name">
+                      {project.name}
+                    </Typography.Text>
+                  </Tooltip>
+                  <Space size={6} wrap className="project-order-meta">
+                    {project.code && <Typography.Text type="secondary">{project.code}</Typography.Text>}
+                    {project.business_owner_name && <Typography.Text type="secondary">业务部负责人：{project.business_owner_name}</Typography.Text>}
+                    <Typography.Text type="secondary">{project.item_count} 个子项目</Typography.Text>
+                  </Space>
+                </div>
+                {project.delivery_status && (
+                  <Tag color={DELIVERY_STATUS_COLORS[project.delivery_status] ?? 'default'} className="project-order-status">
+                    {project.delivery_status}
+                  </Tag>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </Space>
+    </Modal>
   );
 }
 

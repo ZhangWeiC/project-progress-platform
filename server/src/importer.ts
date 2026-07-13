@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs';
 import { createHash } from 'node:crypto';
-import { db, makeId, nowIso } from './db.js';
+import { db, makeId, nextProjectMonthSortOrder, nowIso } from './db.js';
 
 type ImportIssue = {
   source_sheet: string;
@@ -340,9 +340,12 @@ function task(templateId: string, taskType: string, name: string, ownerDepartmen
 
 function importProject(project: ParsedProject, sourceSheet: string) {
   const existingProject = db
-    .prepare('SELECT id FROM project_case WHERE source_sheet = ? AND source_row = ?')
-    .get(sourceSheet, project.sourceRow) as { id: string } | undefined;
+    .prepare('SELECT id, associated_month, month_sort_order FROM project_case WHERE source_sheet = ? AND source_row = ?')
+    .get(sourceSheet, project.sourceRow) as { id: string; associated_month: string | null; month_sort_order: number | null } | undefined;
   const projectId = existingProject?.id ?? `CASE-IMPORT-${project.sourceRow}`;
+  const monthSortOrder = !existingProject || existingProject.associated_month !== project.associatedMonth || existingProject.month_sort_order === null
+    ? nextProjectMonthSortOrder(project.associatedMonth)
+    : existingProject.month_sort_order;
   const businessOwnerId = ensureEmployee(project.businessOwnerName, 'dept-business', 'business_owner');
   const designOwnerId = ensureEmployee(project.designOwnerName, 'dept-design', 'design_owner');
   const status = project.totalProgress >= 100 ? 'completed' : project.totalProgress > 0 ? 'in_progress' : 'not_started';
@@ -351,8 +354,8 @@ function importProject(project: ParsedProject, sourceSheet: string) {
 
   db.prepare(
     `INSERT INTO project_case
-     (id, code, name, category, customer_name, business_owner_id, design_owner_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, delivery_remark, associated_month, source_sheet, source_row, source_seq)
-     VALUES (@id, @code, @name, '', '', @business_owner_id, @design_owner_id, @estimated_weight, 'T', @status, @total_progress, @delivery_date, @delivery_status, @delivery_remark, @associated_month, @source_sheet, @source_row, @source_seq)
+     (id, code, name, category, customer_name, business_owner_id, design_owner_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, delivery_remark, associated_month, month_sort_order, source_sheet, source_row, source_seq)
+     VALUES (@id, @code, @name, '', '', @business_owner_id, @design_owner_id, @estimated_weight, 'T', @status, @total_progress, @delivery_date, @delivery_status, @delivery_remark, @associated_month, @month_sort_order, @source_sheet, @source_row, @source_seq)
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name,
        business_owner_id = excluded.business_owner_id,
@@ -363,6 +366,12 @@ function importProject(project: ParsedProject, sourceSheet: string) {
        delivery_date = excluded.delivery_date,
        delivery_status = excluded.delivery_status,
        delivery_remark = excluded.delivery_remark,
+       month_sort_order = CASE
+         WHEN project_case.month_sort_order IS NULL
+           OR COALESCE(project_case.associated_month, '') != COALESCE(excluded.associated_month, '')
+         THEN excluded.month_sort_order
+         ELSE project_case.month_sort_order
+       END,
        associated_month = excluded.associated_month,
        source_sheet = excluded.source_sheet,
        source_row = excluded.source_row,
@@ -380,6 +389,7 @@ function importProject(project: ParsedProject, sourceSheet: string) {
     delivery_status: deliveryStatus,
     delivery_remark: deliveryRemark,
     associated_month: project.associatedMonth,
+    month_sort_order: monthSortOrder,
     source_sheet: sourceSheet,
     source_row: project.sourceRow,
     source_seq: project.sourceSeq
