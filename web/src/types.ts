@@ -35,7 +35,6 @@ export type MatrixRow = {
   case_item_id: string;
   item_progress: number;
   cells: Record<string, MatrixCell>;
-  open_exception_count: number;
   children?: MatrixRow[];
   associated_month?: string | null;
 };
@@ -47,7 +46,6 @@ export type MatrixResponse = {
   summary?: {
     project_count: number;
     item_count: number;
-    open_exception_count: number;
   };
   pagination?: {
     page: number;
@@ -58,7 +56,6 @@ export type MatrixResponse = {
 
 export type ProjectOrderItem = {
   id: string;
-  code?: string | null;
   name: string;
   associated_month?: string | null;
   business_owner_name?: string | null;
@@ -81,7 +78,6 @@ export type ProjectMonthOrderResponse = {
 
 export type ProjectCase = {
   id: string;
-  code?: string | null;
   name: string;
   category?: string | null;
   customer_name?: string | null;

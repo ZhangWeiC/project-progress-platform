@@ -157,7 +157,6 @@ const projectCaseStageOwnerBody = z.object({
   department_id: z.string().nullable().optional()
 });
 const projectCaseFields = {
-  code: z.string().trim().nullable().optional(),
   category: z.string().trim().nullable().optional(),
   customer_name: z.string().trim().nullable().optional(),
   business_owner_id: z.string().nullable().optional(),

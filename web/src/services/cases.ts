@@ -4,7 +4,6 @@ import type { ExceptionRecord, LookupResponse, MatrixResponse, ProjectCase, Proj
 export const fetchCases = () => apiGet<ProjectCase[]>('/api/cases');
 
 export type ProjectCasePayload = {
-  code?: string | null;
   name: string;
   category?: string | null;
   customer_name?: string | null;

@@ -329,9 +329,6 @@ export function CaseMatrixPage() {
             </Typography.Title>
             <Tag color="blue">{matrixQuery.data?.summary?.project_count ?? 0} 项目</Tag>
             <Tag color="geekblue">{matrixQuery.data?.summary?.item_count ?? 0} 子项目</Tag>
-            <Tag color={matrixQuery.data?.summary?.open_exception_count ? 'red' : 'default'}>
-              {matrixQuery.data?.summary?.open_exception_count ?? 0} 异常
-            </Tag>
           </Space>
           <Space wrap>
             <Select
@@ -409,15 +406,9 @@ export function CaseMatrixPage() {
             )
           }}
           rowClassName={(row) => {
-            const classes = [
-              row.row_type === 'month'
-                ? 'matrix-month-row'
-                : row.row_type === 'project'
-                  ? 'matrix-project-row'
-                  : 'matrix-item-row'
-            ];
-            if (row.open_exception_count > 0) classes.push('row-has-exception');
-            return classes.join(' ');
+            if (row.row_type === 'month') return 'matrix-month-row';
+            if (row.row_type === 'project') return 'matrix-project-row';
+            return 'matrix-item-row';
           }}
         />
         <div className="matrix-pagination">
@@ -571,7 +562,7 @@ function MatrixExpandIcon({
       <span className="matrix-row-action-stack matrix-row-action-stack-single">
         <Popconfirm
           title="删除子项目"
-          description={`确认删除「${itemName}」？会同时删除关联任务、日报、排期和异常。`}
+          description={`确认删除「${itemName}」？会同时删除关联任务、日报和排期。`}
           okText="删除"
           cancelText="取消"
           okButtonProps={{ danger: true, loading: deleteItemLoading }}
@@ -618,7 +609,7 @@ function MatrixExpandIcon({
       {canManageProjectBasics && (
         <Popconfirm
           title="删除项目"
-          description={`确认删除「${projectName}」？会同时删除子项目、任务、日报和异常。`}
+          description={`确认删除「${projectName}」？会同时删除子项目、任务、日报和排期。`}
           okText="删除"
           cancelText="取消"
           okButtonProps={{ danger: true, loading: deleteProjectLoading }}
@@ -733,7 +724,6 @@ function ProjectOrderModal({
                     </Typography.Text>
                   </Tooltip>
                   <Space size={6} wrap className="project-order-meta">
-                    {project.code && <Typography.Text type="secondary">{project.code}</Typography.Text>}
                     {project.business_owner_name && <Typography.Text type="secondary">业务部负责人：{project.business_owner_name}</Typography.Text>}
                     <Typography.Text type="secondary">{project.item_count} 个子项目</Typography.Text>
                   </Space>
@@ -839,10 +829,6 @@ function renderPinnedCell(
 ) {
   const cell = row.cells[key];
   const value = cell?.value;
-  if (key === 'open_exception_count') {
-    const count = Number(value ?? 0);
-    return count > 0 ? <Tag color="red">{count}</Tag> : <span className="empty-cell">0</span>;
-  }
   if (key === 'project_item_name') {
     if (row.row_type === 'month') {
       const meta = stringCellValue(row.cells.case_item_name) ?? '';
@@ -1033,9 +1019,6 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
           <Form.Item label="项目名称" name="name" rules={[{ required: true, message: '请输入项目名称' }]}>
             <Input placeholder="请输入项目名称" />
           </Form.Item>
-          <Form.Item label="项目编号" name="code">
-            <Input placeholder="例如 P-001" />
-          </Form.Item>
           <Form.Item label="项目类型" name="category">
             <Input placeholder="例如 护栏模板" />
           </Form.Item>
@@ -1099,7 +1082,7 @@ function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinition
                         return (
                           <Popconfirm
                             title="删除子项目"
-                            description="保存项目后会删除该子项目及关联任务、日报和异常，确认先从表单移除？"
+                            description="保存项目后会删除该子项目及关联任务、日报和排期，确认先从表单移除？"
                             okText="移除"
                             cancelText="取消"
                             okButtonProps={{ danger: true }}
@@ -1183,7 +1166,6 @@ function stageOwnerTreeKey(taskType: string) {
 
 function projectToForm(project: ProjectCase): ProjectCaseFormValues {
   return {
-    code: project.code ?? null,
     name: project.name,
     category: project.category ?? null,
     associated_month: project.associated_month ?? null,
@@ -1236,7 +1218,6 @@ function normalizeProjectPayload(values: ProjectCaseFormValues, stages: StageDef
   const businessOwner = decodeOwnerValue(values.business_owner_value);
   const designOwner = designStageOwner ?? decodeOwnerValue(values.design_owner_value);
   return {
-    code: values.code ?? null,
     name: values.name,
     category: values.category ?? null,
     associated_month: values.associated_month ?? null,

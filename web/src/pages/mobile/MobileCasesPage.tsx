@@ -94,7 +94,6 @@ function ProjectCard({ row, onClick }: { row: ProjectRow; onClick: () => void })
         </Typography.Text>
         <Progress percent={progress} size="small" />
         <div className="mobile-project-meta-row">
-          <Typography.Text type="secondary">异常 {row.open_exception_count ?? 0}</Typography.Text>
           <Typography.Text type="secondary">进入详情</Typography.Text>
         </div>
       </Space>

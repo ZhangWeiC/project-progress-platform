@@ -478,7 +478,6 @@ function progressStatus(progress: number) {
 }
 
 export type ProjectCaseInput = {
-  code?: string | null;
   name?: string;
   category?: string | null;
   customer_name?: string | null;
@@ -564,11 +563,10 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
   const tx = db.transaction(() => {
     db.prepare(
       `INSERT INTO project_case
-       (id, code, name, category, customer_name, business_owner_id, business_owner_department_id, design_owner_id, design_owner_department_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, delivery_remark, associated_month, month_sort_order, source_sheet, source_row, source_seq)
-       VALUES (@id, @code, @name, @category, @customer_name, @business_owner_id, @business_owner_department_id, @design_owner_id, @design_owner_department_id, @estimated_weight, 'T', 'in_progress', 0, @delivery_date, @delivery_status, @delivery_remark, @associated_month, @month_sort_order, 'manual', null, @source_seq)`
+       (id, name, category, customer_name, business_owner_id, business_owner_department_id, design_owner_id, design_owner_department_id, estimated_weight, weight_unit, status, total_progress, delivery_date, delivery_status, delivery_remark, associated_month, month_sort_order, source_sheet, source_row, source_seq)
+       VALUES (@id, @name, @category, @customer_name, @business_owner_id, @business_owner_department_id, @design_owner_id, @design_owner_department_id, @estimated_weight, 'T', 'in_progress', 0, @delivery_date, @delivery_status, @delivery_remark, @associated_month, @month_sort_order, 'manual', null, @source_seq)`
     ).run({
       id,
-      code: normalizeText(input.code),
       name,
       category: normalizeText(input.category),
       customer_name: normalizeText(input.customer_name),
@@ -640,8 +638,7 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
   const tx = db.transaction(() => {
     db.prepare(
       `UPDATE project_case
-       SET code = @code,
-           name = @name,
+       SET name = @name,
            category = @category,
            customer_name = @customer_name,
            business_owner_id = @business_owner_id,
@@ -657,7 +654,6 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
        WHERE id = @id`
     ).run({
       id: projectCaseId,
-      code: normalizeText(input.code === undefined ? existing.code : input.code),
       name: (input.name ?? existing.name ?? '').trim(),
       category: normalizeText(input.category === undefined ? existing.category : input.category),
       customer_name: normalizeText(input.customer_name === undefined ? existing.customer_name : input.customer_name),
@@ -745,7 +741,7 @@ export function deleteProjectCaseItem(projectCaseId: string, itemId: string, use
 export function getProjectMonthOrder(user: CurrentUser) {
   assertCanManageProjects(user);
   const rows = db.prepare(
-    `SELECT pc.id, pc.code, pc.name, pc.associated_month, pc.month_sort_order, pc.source_seq,
+    `SELECT pc.id, pc.name, pc.associated_month, pc.month_sort_order, pc.source_seq,
             pc.delivery_status, COALESCE(b.name, bd.name) as business_owner_name,
             (SELECT COUNT(*) FROM case_item ci WHERE ci.project_case_id = pc.id) as item_count
      FROM project_case pc
@@ -754,7 +750,6 @@ export function getProjectMonthOrder(user: CurrentUser) {
      ORDER BY pc.associated_month DESC, pc.month_sort_order ASC, pc.source_seq DESC, pc.id DESC`
   ).all() as Array<{
     id: string;
-    code: string | null;
     name: string;
     associated_month: string | null;
     month_sort_order: number | null;
@@ -1574,7 +1569,6 @@ type MatrixProject = {
   associated_month: string | null;
   business_owner_name: string | null;
   design_owner_name: string | null;
-  open_exception_count: number;
 };
 
 type MatrixItem = {
@@ -1586,7 +1580,6 @@ type MatrixItem = {
   delivery_date: string | null;
   delivery_status: string | null;
   delivery_remark: string | null;
-  open_exception_count: number;
 };
 
 type MatrixTemplateColumn = {
@@ -1652,7 +1645,6 @@ type MatrixRow = {
   case_item_id: string;
   item_progress: number;
   cells: Record<string, MatrixCell>;
-  open_exception_count: number;
   children?: MatrixRow[];
   associated_month?: string | null;
 };
@@ -1675,14 +1667,12 @@ export function getAllMatrix(user: CurrentUser, query: MatrixQuery = {}) {
   const projectRows = pagedProjects.map((project) => buildProjectMatrixRow(project, templates, user));
   const rows = groupMatrixRowsByMonth(projectRows);
   const itemCount = projects.reduce((sum, project) => sum + countProjectItems(project.id), 0);
-  const openExceptionCount = projects.reduce((sum, project) => sum + project.open_exception_count, 0);
   return {
     columns,
     rows,
     summary: {
       project_count: total,
-      item_count: itemCount,
-      open_exception_count: openExceptionCount
+      item_count: itemCount
     },
     pagination: {
       page,
@@ -1759,10 +1749,7 @@ function countProjectItems(projectCaseId: string) {
 function getVisibleMatrixProjects(user: CurrentUser) {
   const sql = `SELECT pc.*,
                       COALESCE(b.name, bd.name) as business_owner_name,
-                      COALESCE(de.name, dd.name) as design_owner_name,
-                      (SELECT COUNT(*) FROM exception_record ex
-                       WHERE ex.project_case_id = pc.id
-                         AND ex.status NOT IN ('resolved', 'closed', 'cancelled')) as open_exception_count
+                      COALESCE(de.name, dd.name) as design_owner_name
                FROM project_case pc
                LEFT JOIN employee b ON b.id = pc.business_owner_id
                LEFT JOIN department bd ON bd.id = pc.business_owner_department_id
@@ -1787,7 +1774,6 @@ function groupMatrixRowsByMonth(projectRows: MatrixRow[]) {
 
 function buildMonthMatrixRow(month: string, rows: MatrixRow[]): MatrixRow {
   const itemCount = rows.reduce((sum, row) => sum + (row.children?.length ?? 0), 0);
-  const exceptionCount = rows.reduce((sum, row) => sum + row.open_exception_count, 0);
   return {
     row_id: `MONTH-${month}`,
     row_type: 'month',
@@ -1795,12 +1781,10 @@ function buildMonthMatrixRow(month: string, rows: MatrixRow[]): MatrixRow {
     case_item_id: `MONTH-${month}`,
     item_progress: 0,
     associated_month: month,
-    open_exception_count: exceptionCount,
     cells: {
       project_item_name: { value: formatAssociatedMonth(month), aggregateCount: itemCount },
       case_name: { value: formatAssociatedMonth(month) },
-      case_item_name: { value: `${rows.length} 项目 / ${itemCount} 子项目` },
-      open_exception_count: { value: exceptionCount }
+      case_item_name: { value: `${rows.length} 项目 / ${itemCount} 子项目` }
     }
   };
 }
@@ -1844,18 +1828,14 @@ function buildMatrixColumns(templates: MatrixTemplateColumn[]) {
       groupIndex: index
     })),
     { key: 'delivery_date', title: '发货时间', group: '发货' },
-    { key: 'delivery_status', title: '发货情况', group: '发货' },
-    { key: 'open_exception_count', title: '异常', frozen: 'right' }
+    { key: 'delivery_status', title: '发货情况', group: '发货' }
   ];
 }
 
 function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplateColumn[], user: CurrentUser): MatrixRow {
   const items = db
     .prepare(
-      `SELECT ci.*,
-              (SELECT COUNT(*) FROM exception_record ex
-               WHERE ex.case_item_id = ci.id
-                 AND ex.status NOT IN ('resolved', 'closed', 'cancelled')) as open_exception_count
+      `SELECT ci.*
        FROM case_item ci
        WHERE ci.project_case_id = ?
        ORDER BY ci.source_row, ci.id`
@@ -1882,8 +1862,7 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
       status: project.status
     },
     delivery_date: { value: aggregateDeliveryDateRange(items) },
-    delivery_status: { value: deliverySummary.status ?? '', deliveryRemark: deliverySummary.remark },
-    open_exception_count: { value: project.open_exception_count }
+    delivery_status: { value: deliverySummary.status ?? '', deliveryRemark: deliverySummary.remark }
   };
 
   for (const template of templates) {
@@ -1931,7 +1910,6 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
     item_progress: project.total_progress,
     associated_month: project.associated_month,
     cells,
-    open_exception_count: project.open_exception_count,
     children
   };
 }
@@ -1947,8 +1925,7 @@ function buildItemMatrixRow(project: MatrixProject, item: MatrixItem, caseTasks:
     delivery_status: {
       value: normalizeDeliveryStatus(item.delivery_status) ?? '',
       deliveryRemark: normalizeDeliveryRemark(normalizeDeliveryStatus(item.delivery_status), item.delivery_remark, item.delivery_status)
-    },
-    open_exception_count: { value: item.open_exception_count }
+    }
   };
 
   for (const task of tasks) {
@@ -1977,8 +1954,7 @@ function buildItemMatrixRow(project: MatrixProject, item: MatrixItem, caseTasks:
     project_case_id: project.id,
     case_item_id: item.id,
     item_progress: item.progress,
-    cells,
-    open_exception_count: item.open_exception_count
+    cells
   };
 }
 
@@ -2108,7 +2084,6 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
     { key: 'design_owner_name', title: '设计部负责人', frozen: true },
     { key: 'delivery_date', title: '发货时间', group: '发货' },
     { key: 'delivery_status', title: '发货情况', group: '发货' },
-    { key: 'open_exception_count', title: '异常', frozen: true },
     ...subtaskTemplates.map((column) => ({
       key: `${column.task_type}.${column.subtask_template_id}`,
       title: column.subtask_name,
@@ -2133,11 +2108,6 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
         deliveryRemark: normalizeDeliveryRemark(normalizeDeliveryStatus(item.delivery_status), item.delivery_remark, item.delivery_status)
       }
     };
-
-    const openExceptionCount = db
-      .prepare("SELECT COUNT(*) as count FROM exception_record WHERE case_item_id = ? AND status NOT IN ('resolved', 'closed', 'cancelled')")
-      .get(item.id) as { count: number };
-    cells.open_exception_count = { value: openExceptionCount.count };
 
     for (const task of tasks) {
       const subtasks = getMatrixSubtasks(task.id);
@@ -2166,7 +2136,6 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
       case_item_id: item.id,
       item_progress: item.progress,
       cells,
-      open_exception_count: openExceptionCount.count,
       associated_month: projectCase.associated_month
     };
   });
