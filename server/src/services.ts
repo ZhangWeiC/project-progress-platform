@@ -323,6 +323,93 @@ export function updateProgress(targetType: TargetType, targetId: string, progres
   return getTaskDetails(targetType === 'task' ? targetId : (db.prepare('SELECT case_task_id FROM case_subtask WHERE id = ?').get(targetId) as { case_task_id: string }).case_task_id, user);
 }
 
+export function updateProjectBulkSubtaskProgress(projectCaseId: string, subtaskTemplateId: string, progress: number, user: CurrentUser, reason?: string) {
+  if (progress < 0 || progress > 100) {
+    const err = new Error('进度必须在 0 到 100 之间');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+
+  assertCanReadCase(user, projectCaseId);
+  const template = db
+    .prepare(
+      `SELECT st.id, st.name, COALESCE(st.allow_project_bulk_update, 0) as allow_project_bulk_update,
+              tt.name as task_name
+       FROM subtask_template st
+       JOIN task_template tt ON tt.id = st.task_template_id
+       WHERE st.id = ?`
+    )
+    .get(subtaskTemplateId) as { id: string; name: string; allow_project_bulk_update: number; task_name: string } | undefined;
+  if (!template) {
+    const err = new Error('子流程模板不存在');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+  if (template.allow_project_bulk_update !== 1) {
+    const err = new Error('该子流程未配置项目级批量更新');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+
+  const targets = db
+    .prepare(
+      `SELECT s.id, s.status, s.progress, s.case_task_id
+       FROM case_subtask s
+       JOIN case_task t ON t.id = s.case_task_id
+       WHERE t.project_case_id = ?
+         AND t.case_item_id IS NOT NULL
+         AND t.is_applicable = 1
+         AND s.is_applicable = 1
+         AND s.subtask_template_id = ?
+       ORDER BY t.case_item_id, s.sort_order`
+    )
+    .all(projectCaseId, subtaskTemplateId) as Array<{ id: string; status: string; progress: number; case_task_id: string }>;
+  if (targets.length === 0) {
+    const err = new Error('当前项目没有可批量更新的子流程');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+  if (targets.some((target) => !canEditSubtask(user, target.id))) {
+    const err = new Error('当前用户不能批量修改该项目下全部子项目进度');
+    err.name = 'PERMISSION_DENIED';
+    throw err;
+  }
+
+  const changedAt = nowIso();
+  const nextStatus = progressStatus(progress);
+  const taskIds = Array.from(new Set(targets.map((target) => target.case_task_id)));
+  const tx = db.transaction(() => {
+    for (const target of targets) {
+      db.prepare('UPDATE case_subtask SET progress = ?, status = ? WHERE id = ?').run(progress, nextStatus, target.id);
+      db.prepare(
+        `INSERT INTO progress_log
+         (id, target_type, target_id, changed_by, before_status, after_status, before_progress, after_progress, source, reason, remark, created_at)
+         VALUES (@id, 'subtask', @target_id, @changed_by, @before_status, @after_status, @before_progress, @after_progress, 'project_bulk_edit', @reason, '', @created_at)`
+      ).run({
+        id: makeId('PL'),
+        target_id: target.id,
+        changed_by: user.id,
+        before_status: target.status,
+        after_status: nextStatus,
+        before_progress: target.progress,
+        after_progress: progress,
+        reason: reason ?? `项目级批量更新：${template.task_name} / ${template.name}`,
+        created_at: changedAt
+      });
+    }
+    for (const taskId of taskIds) recalculateTask(taskId, changedAt);
+  });
+  tx();
+
+  return {
+    ok: true,
+    project_case_id: projectCaseId,
+    subtask_template_id: subtaskTemplateId,
+    updated_count: targets.length,
+    progress
+  };
+}
+
 export function recalculateTask(taskId: string, changedAt = nowIso()) {
   const subtasks = db
     .prepare('SELECT progress FROM case_subtask WHERE case_task_id = ? AND is_applicable = 1 AND include_in_progress = 1')
@@ -1430,6 +1517,7 @@ type MatrixTemplateColumn = {
   subtask_template_id: string;
   subtask_name: string;
   sort_order: number;
+  allow_project_bulk_update: number;
 };
 
 type MatrixTask = {
@@ -1461,7 +1549,7 @@ type MatrixCell = {
   value: string | number | null;
   status?: string;
   editable?: boolean;
-  targetType?: 'task' | 'subtask';
+  targetType?: 'task' | 'subtask' | 'bulk_subtask';
   targetId?: string;
   taskId?: string;
   ownerName?: string;
@@ -1471,6 +1559,11 @@ type MatrixCell = {
   progress_started_at?: string | null;
   progress_finished_at?: string | null;
   deliveryRemark?: string | null;
+  bulkTarget?: {
+    projectCaseId: string;
+    subtaskTemplateId: string;
+    targetCount: number;
+  };
 };
 
 type MatrixRow = {
@@ -1650,7 +1743,8 @@ function getMatrixTemplateColumns() {
   return db
     .prepare(
       `SELECT tt.task_type, tt.name as task_name, tt.generation_scope,
-              st.id as subtask_template_id, st.name as subtask_name, st.sort_order
+              st.id as subtask_template_id, st.name as subtask_name, st.sort_order,
+              COALESCE(st.allow_project_bulk_update, 0) as allow_project_bulk_update
        FROM task_template tt
        JOIN subtask_template st ON st.task_template_id = tt.id
        WHERE st.id != 'st-design-confirm'
@@ -1720,13 +1814,27 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
       .filter((cell): cell is MatrixCell => Boolean(cell) && typeof cell.value === 'number');
     if (childCells.length > 0) {
       const average = roundProgress(childCells.reduce((sum, cell) => sum + Number(cell.value), 0) / childCells.length);
+      const bulkTargetCount = childCells.filter((cell) => cell.targetType === 'subtask' && cell.targetId).length;
+      const bulkEditable = template.allow_project_bulk_update === 1
+        && childCells.length === children.length
+        && bulkTargetCount === childCells.length
+        && childCells.every((cell) => cell.editable);
       cells[key] = {
         value: average,
         status: progressStatus(average),
+        editable: bulkEditable,
+        targetType: bulkEditable ? 'bulk_subtask' : undefined,
         ownerName: compactOwners(childCells.map((cell) => cell.ownerName)),
         aggregateCount: childCells.length,
         progress_started_at: aggregateProgressStart(childCells),
-        progress_finished_at: aggregateProgressFinish(childCells, average)
+        progress_finished_at: aggregateProgressFinish(childCells, average),
+        bulkTarget: bulkEditable
+          ? {
+              projectCaseId: project.id,
+              subtaskTemplateId: template.subtask_template_id,
+              targetCount: bulkTargetCount
+            }
+          : undefined
       };
       if (hasSingleOwner(childCells)) {
         for (const cell of childCells) {

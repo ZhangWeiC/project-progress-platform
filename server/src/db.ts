@@ -177,6 +177,7 @@ export function initializeDatabase() {
       progress_rule TEXT NOT NULL DEFAULT 'manual',
       required INTEGER NOT NULL DEFAULT 1,
       skippable INTEGER NOT NULL DEFAULT 0,
+      allow_project_bulk_update INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY (task_template_id) REFERENCES task_template(id)
     );
 
@@ -400,6 +401,7 @@ export function initializeDatabase() {
   migrateFeishuIdentityColumns();
   migrateProjectAssociatedMonth();
   migrateDeliveryStatusModel();
+  migrateProjectBulkProgressConfig();
   seedDatabase();
   hideLegacyLocalDepartments();
   seedCredentials();
@@ -701,6 +703,11 @@ function migrateDeliveryStatusModel() {
   normalizeDeliveryStatusRows('case_item');
 }
 
+function migrateProjectBulkProgressConfig() {
+  addColumnIfMissing('subtask_template', 'allow_project_bulk_update', 'INTEGER NOT NULL DEFAULT 0');
+  db.prepare("UPDATE subtask_template SET allow_project_bulk_update = 1 WHERE id = 'st-drawing-review'").run();
+}
+
 function normalizeDeliveryStatusRows(table: 'project_case' | 'case_item') {
   const rows = db.prepare(`SELECT id, delivery_status, delivery_remark FROM ${table}`).all() as Array<{
     id: string;
@@ -799,24 +806,24 @@ function seedDatabase() {
   ]);
 
   insertMany('subtask_template', [
-    { id: 'st-drawing-review', task_template_id: 'tt-design', name: '图纸定审', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-plate-purchase', task_template_id: 'tt-material', name: '板材请购', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-plate-in', task_template_id: 'tt-material', name: '板材入库', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-profile-purchase', task_template_id: 'tt-material', name: '型材请购', sort_order: 30, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-profile-in', task_template_id: 'tt-material', name: '型材入库', sort_order: 40, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-parts-in', task_template_id: 'tt-material', name: '零配件入库', sort_order: 50, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-plate-cut', task_template_id: 'tt-cutting', name: '板材套料切割', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-plate-machine', task_template_id: 'tt-cutting', name: '板材机加工', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-profile-cut', task_template_id: 'tt-cutting', name: '型材套料切割', sort_order: 30, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-profile-machine', task_template_id: 'tt-cutting', name: '型材机加工', sort_order: 40, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-assembly', task_template_id: 'tt-production', name: '单片体拼装', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-welding', task_template_id: 'tt-production', name: '单片体焊接', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-cleaning', task_template_id: 'tt-production', name: '单片体清磨', sort_order: 30, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-preassembly', task_template_id: 'tt-production', name: '预拼装、校正', sort_order: 40, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-painting', task_template_id: 'tt-painting', name: '喷涂作业', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-self-check', task_template_id: 'tt-inspection', name: '自检', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-mutual-check', task_template_id: 'tt-inspection', name: '互检', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0 },
-    { id: 'st-special-check', task_template_id: 'tt-inspection', name: '专检', sort_order: 30, progress_rule: 'manual', required: 1, skippable: 0 }
+    { id: 'st-drawing-review', task_template_id: 'tt-design', name: '图纸定审', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 1 },
+    { id: 'st-plate-purchase', task_template_id: 'tt-material', name: '板材请购', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-plate-in', task_template_id: 'tt-material', name: '板材入库', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-profile-purchase', task_template_id: 'tt-material', name: '型材请购', sort_order: 30, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-profile-in', task_template_id: 'tt-material', name: '型材入库', sort_order: 40, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-parts-in', task_template_id: 'tt-material', name: '零配件入库', sort_order: 50, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-plate-cut', task_template_id: 'tt-cutting', name: '板材套料切割', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-plate-machine', task_template_id: 'tt-cutting', name: '板材机加工', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-profile-cut', task_template_id: 'tt-cutting', name: '型材套料切割', sort_order: 30, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-profile-machine', task_template_id: 'tt-cutting', name: '型材机加工', sort_order: 40, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-assembly', task_template_id: 'tt-production', name: '单片体拼装', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-welding', task_template_id: 'tt-production', name: '单片体焊接', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-cleaning', task_template_id: 'tt-production', name: '单片体清磨', sort_order: 30, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-preassembly', task_template_id: 'tt-production', name: '预拼装、校正', sort_order: 40, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-painting', task_template_id: 'tt-painting', name: '喷涂作业', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-self-check', task_template_id: 'tt-inspection', name: '自检', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-mutual-check', task_template_id: 'tt-inspection', name: '互检', sort_order: 20, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 },
+    { id: 'st-special-check', task_template_id: 'tt-inspection', name: '专检', sort_order: 30, progress_rule: 'manual', required: 1, skippable: 0, allow_project_bulk_update: 0 }
   ]);
 
   const existing = db.prepare('SELECT COUNT(*) as count FROM project_case').get() as { count: number };
@@ -1133,6 +1140,7 @@ function migrateWorkflowModel() {
   const tx = db.transaction(() => {
     db.prepare("UPDATE task_template SET name = '设计', task_type = 'design', sort_order = 10, generation_scope = 'item', progress_rule = 'average' WHERE id = 'tt-design'").run();
     db.prepare("UPDATE subtask_template SET name = '图纸定审', sort_order = 10 WHERE id = 'st-drawing-review'").run();
+    db.prepare("UPDATE subtask_template SET allow_project_bulk_update = 1 WHERE id = 'st-drawing-review'").run();
     db.prepare("UPDATE task_template SET sort_order = 20 WHERE id = 'tt-material'").run();
     db.prepare("UPDATE task_template SET name = '开料', sort_order = 30 WHERE id = 'tt-cutting'").run();
     db.prepare("UPDATE case_task SET name = replace(name, '下料', '开料') WHERE task_template_id = 'tt-cutting' AND name LIKE '%下料%'").run();

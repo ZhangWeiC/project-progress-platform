@@ -1,13 +1,14 @@
-import { LockOutlined, WarningOutlined } from '@ant-design/icons';
+import { EditOutlined, LockOutlined, WarningOutlined } from '@ant-design/icons';
 import { Button, Space, Tooltip } from 'antd';
 import type { MatrixCell } from '../../types';
 
 type Props = {
   cell?: MatrixCell;
   onOpenTask?: (taskId: string) => void;
+  onBulkEdit?: (cell: MatrixCell) => void;
 };
 
-export function ProgressCell({ cell, onOpenTask }: Props) {
+export function ProgressCell({ cell, onOpenTask, onBulkEdit }: Props) {
   if (!cell) return <span className="empty-cell">-</span>;
   const value = typeof cell.value === 'number' ? cell.value : null;
   const editable = Boolean(cell.editable);
@@ -40,6 +41,30 @@ export function ProgressCell({ cell, onOpenTask }: Props) {
         )}
         {timing}
       </Button>
+    );
+  }
+
+  if (cell.bulkTarget && value !== null) {
+    return (
+      <Tooltip title={`批量更新 ${cell.bulkTarget.targetCount} 个子项目`}>
+        <Button
+          className="progress-cell"
+          type="text"
+          size="small"
+          onClick={() => onBulkEdit?.(cell)}
+        >
+          <Space size={4} className="progress-cell-main">
+            <span className={valueClassName}>{formattedValue}</span>
+            <EditOutlined className="muted-icon" />
+          </Space>
+          {owner && (
+            <Tooltip title={owner}>
+              <span className="progress-owner">{owner}</span>
+            </Tooltip>
+          )}
+          {timing}
+        </Button>
+      </Tooltip>
     );
   }
 

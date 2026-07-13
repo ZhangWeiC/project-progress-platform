@@ -22,6 +22,7 @@ import {
   getTaskDetails,
   getWorkSummaryReport,
   getWorkLogPlanItems,
+  updateProjectBulkSubtaskProgress,
   updateProductionPlanItem,
   updateDeliveryInfo,
   updateProgress,
@@ -358,6 +359,17 @@ app.patch('/api/subtasks/:id/progress', async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const body = progressBody.parse(request.body);
   return updateProgress('subtask', id, body.progress, user, body.reason);
+});
+
+app.patch('/api/cases/:id/bulk-subtask-progress', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const body = z.object({
+    subtask_template_id: z.string(),
+    progress: z.number().min(0).max(100),
+    reason: z.string().optional()
+  }).parse(request.body);
+  return updateProjectBulkSubtaskProgress(id, body.subtask_template_id, body.progress, user, body.reason);
 });
 
 app.get('/api/work-log-plan-items', async (request) => {

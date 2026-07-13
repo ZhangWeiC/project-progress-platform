@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Key, MouseEvent } from 'react';
 import { TaskDrawer } from '../../components/drawers/TaskDrawer';
 import { ProgressCell } from '../../components/matrix/ProgressCell';
-import { createProjectCase, deleteProjectCase, deleteProjectCaseItem, fetchAllMatrix, fetchLookups, fetchProjectCaseManageProfile, updateDeliveryInfo, updateProjectCase } from '../../services/cases';
+import { createProjectCase, deleteProjectCase, deleteProjectCaseItem, fetchAllMatrix, fetchLookups, fetchProjectCaseManageProfile, updateDeliveryInfo, updateProjectBulkSubtaskProgress, updateProjectCase } from '../../services/cases';
 import type { ProjectCasePayload } from '../../services/cases';
 import { getAuthSession } from '../../services/auth';
 import type { LookupResponse, MatrixCell, MatrixColumn, MatrixRow, ProjectCase, ProjectStageOwner } from '../../types';
@@ -50,6 +50,14 @@ type DeliveryEditorTarget = {
   title: string;
 };
 
+type BulkProgressEditorTarget = {
+  projectCaseId: string;
+  subtaskTemplateId: string;
+  title: string;
+  targetCount: number;
+  currentProgress: number;
+};
+
 export function CaseMatrixPage() {
   const [form] = Form.useForm<ProjectCaseFormValues>();
   const [deliveryForm] = Form.useForm<DeliveryFormValues>();
@@ -63,6 +71,8 @@ export function CaseMatrixPage() {
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectCase | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [bulkProgressEditor, setBulkProgressEditor] = useState<BulkProgressEditorTarget | null>(null);
+  const [bulkProgressValue, setBulkProgressValue] = useState(0);
   const queryClient = useQueryClient();
   const watchedDeliveryStatus = Form.useWatch('delivery_status', deliveryForm);
   const currentUser = getAuthSession()?.user;
@@ -149,6 +159,17 @@ export function CaseMatrixPage() {
     },
     onError: (error) => message.error(error.message)
   });
+  const bulkProgressMutation = useMutation({
+    mutationFn: ({ caseId, subtaskTemplateId, progress }: { caseId: string; subtaskTemplateId: string; progress: number }) => (
+      updateProjectBulkSubtaskProgress(caseId, subtaskTemplateId, progress)
+    ),
+    onSuccess: async (result) => {
+      message.success(`已批量更新 ${result.updated_count} 个子项目`);
+      setBulkProgressEditor(null);
+      await refreshProjectQueries();
+    },
+    onError: (error) => message.error(error.message)
+  });
 
   const openCreateProject = () => {
     if (!canManageProjectBasics) return;
@@ -203,10 +224,33 @@ export function CaseMatrixPage() {
       delivery_remark: values.delivery_status === '其他' ? values.delivery_remark ?? null : null
     });
   };
+  const openBulkProgressEditor = (row: MatrixRow, column: MatrixColumn, cell: MatrixCell) => {
+    if (row.row_type !== 'project' || !cell.bulkTarget) return;
+    const projectName = String(row.cells.project_item_name?.value ?? '项目');
+    const currentProgress = typeof cell.value === 'number' ? Math.round(cell.value) : 0;
+    setBulkProgressEditor({
+      projectCaseId: cell.bulkTarget.projectCaseId,
+      subtaskTemplateId: cell.bulkTarget.subtaskTemplateId,
+      title: `${projectName} / ${column.group ?? ''} / ${column.title}`,
+      targetCount: cell.bulkTarget.targetCount,
+      currentProgress
+    });
+    setBulkProgressValue(currentProgress);
+  };
+  const submitBulkProgress = () => {
+    if (!bulkProgressEditor) return;
+    const progress = Math.max(0, Math.min(100, Math.round(Number(bulkProgressValue) || 0)));
+    setBulkProgressValue(progress);
+    bulkProgressMutation.mutate({
+      caseId: bulkProgressEditor.projectCaseId,
+      subtaskTemplateId: bulkProgressEditor.subtaskTemplateId,
+      progress
+    });
+  };
 
   const tableColumns = useMemo(
-    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjects, canManageProjectBasics, openDeliveryEditor, openEditProject),
-    [matrixQuery.data?.columns, canManageProjects, canManageProjectBasics]
+    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjects, canManageProjectBasics, openDeliveryEditor, openEditProject, openBulkProgressEditor),
+    [matrixQuery.data?.columns, canManageProjects, canManageProjectBasics, openBulkProgressEditor]
   );
 
   return (
@@ -327,6 +371,42 @@ export function CaseMatrixPage() {
         open={Boolean(openedTaskId)}
         onClose={() => setOpenedTaskId(undefined)}
       />
+      <Modal
+        title={`批量更新进度 - ${bulkProgressEditor?.title ?? ''}`}
+        open={Boolean(bulkProgressEditor)}
+        onCancel={() => setBulkProgressEditor(null)}
+        onOk={submitBulkProgress}
+        okText="保存"
+        confirmLoading={bulkProgressMutation.isPending}
+        destroyOnClose
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Typography.Text type="secondary">
+            将统一更新 {bulkProgressEditor?.targetCount ?? 0} 个子项目的该工序进度。
+          </Typography.Text>
+          <InputNumber
+            min={0}
+            max={100}
+            value={bulkProgressValue}
+            addonAfter="%"
+            style={{ width: '100%' }}
+            onChange={(value) => setBulkProgressValue(Number(value ?? 0))}
+            onPressEnter={submitBulkProgress}
+          />
+          <Space size={8} wrap>
+            {[0, 25, 50, 75, 100].map((preset) => (
+              <Button
+                key={preset}
+                size="small"
+                type={bulkProgressValue === preset ? 'primary' : 'default'}
+                onClick={() => setBulkProgressValue(preset)}
+              >
+                {preset}%
+              </Button>
+            ))}
+          </Space>
+        </Space>
+      </Modal>
       <Modal
         title={`编辑发货信息 - ${deliveryEditor?.title ?? ''}`}
         open={Boolean(deliveryEditor)}
@@ -474,7 +554,8 @@ function buildColumns(
   canManageProjects: boolean,
   canManageProjectBasics: boolean,
   onEditDelivery: (row: MatrixRow) => void,
-  onEditProject: (projectCaseId: string) => void
+  onEditProject: (projectCaseId: string) => void,
+  onBulkProgressEdit: (row: MatrixRow, column: MatrixColumn, cell: MatrixCell) => void
 ): ColumnsType<MatrixRow> {
   const leftColumns = columns
     .filter((column) => column.frozen === 'left')
@@ -526,7 +607,7 @@ function buildColumns(
             if (row.row_type === 'month') return <span className="matrix-month-spacer" />;
             return isPlainMatrixColumn(child)
               ? <DeliveryInfoCell columnKey={child.key} row={row} editable={canManageProjects} onEdit={onEditDelivery} />
-              : <ProgressCell cell={row.cells[child.key]} onOpenTask={openTask} />;
+              : <ProgressCell cell={row.cells[child.key]} onOpenTask={openTask} onBulkEdit={(cell) => onBulkProgressEdit(row, child, cell)} />;
           }
         };
         return column;

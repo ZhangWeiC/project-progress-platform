@@ -546,7 +546,9 @@ function WorkflowTemplateTable({ rows, loading }: { rows: WorkflowStage[]; loadi
           render: (subprocesses: WorkflowStage['subprocesses']) => (
             <Space size={[4, 4]} wrap>
               {subprocesses.map((item, index) => (
-                <Tag key={item.id}>{index + 1}. {item.name}</Tag>
+                <Tag key={item.id} color={item.allow_project_bulk_update ? 'blue' : undefined}>
+                  {index + 1}. {item.name}{item.allow_project_bulk_update ? ' · 项目行批量' : ''}
+                </Tag>
               ))}
             </Space>
           )

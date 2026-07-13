@@ -75,6 +75,12 @@ export const updateSubtaskProgress = (subtaskId: string, progress: number) =>
 export const updateTaskProgress = (taskId: string, progress: number) =>
   apiPatch<TaskDetails>(`/api/tasks/${taskId}/progress`, { progress });
 
+export const updateProjectBulkSubtaskProgress = (caseId: string, subtaskTemplateId: string, progress: number) =>
+  apiPatch<{ ok: boolean; updated_count: number; progress: number }>(`/api/cases/${caseId}/bulk-subtask-progress`, {
+    subtask_template_id: subtaskTemplateId,
+    progress
+  });
+
 export const fetchLookups = () => apiGet<LookupResponse>('/api/lookups');
 
 export const createWorkLog = (payload: Partial<WorkLogEntry> & Record<string, unknown>) =>

@@ -11,7 +11,7 @@ export type MatrixCell = {
   value: string | number | null;
   status?: string;
   editable?: boolean;
-  targetType?: 'task' | 'subtask';
+  targetType?: 'task' | 'subtask' | 'bulk_subtask';
   targetId?: string;
   taskId?: string;
   ownerName?: string;
@@ -21,6 +21,11 @@ export type MatrixCell = {
   progress_started_at?: string | null;
   progress_finished_at?: string | null;
   deliveryRemark?: string | null;
+  bulkTarget?: {
+    projectCaseId: string;
+    subtaskTemplateId: string;
+    targetCount: number;
+  };
 };
 
 export type MatrixRow = {
@@ -281,6 +286,7 @@ export type WorkflowSubprocess = {
   progress_rule: string;
   required: number;
   skippable: number;
+  allow_project_bulk_update?: number;
 };
 
 export type WorkflowStage = {
