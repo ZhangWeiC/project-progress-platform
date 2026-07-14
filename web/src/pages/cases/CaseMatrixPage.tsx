@@ -9,7 +9,7 @@ import { ProgressCell } from '../../components/matrix/ProgressCell';
 import { createProjectCase, deleteProjectCase, deleteProjectCaseItem, fetchAllMatrix, fetchLookups, fetchProjectCaseManageProfile, fetchProjectMonthOrder, updateDeliveryInfo, updateProjectBulkSubtaskProgress, updateProjectCase, updateProjectMonthOrder } from '../../services/cases';
 import type { ProjectCasePayload } from '../../services/cases';
 import { getAuthSession } from '../../services/auth';
-import type { LookupResponse, MatrixCell, MatrixColumn, MatrixRow, ProjectCase, ProjectMonthOrderGroup, ProjectOrderItem, ProjectStageOwner } from '../../types';
+import type { LookupResponse, MatrixCell, MatrixColumn, MatrixRow, OwnerLookupNode, ProjectCase, ProjectMonthOrderGroup, ProjectOrderItem, ProjectStageOwner } from '../../types';
 
 const STAGE_COLORS = ['blue', 'cyan', 'green', 'lime', 'gold', 'orange', 'purple'];
 const DELIVERY_STATUS_OPTIONS = [
@@ -26,6 +26,14 @@ const DELIVERY_STATUS_COLORS: Record<string, string> = {
   待发货: 'warning',
   发货中: 'processing',
   其他: 'purple'
+};
+const EMPTY_OWNER_TREES: NonNullable<LookupResponse['owner_trees']> = {};
+const DEFAULT_STAGE_OWNER_TARGETS: Record<string, { treeKey: string; title: string }> = {
+  design: { treeKey: 'design', title: '设计部' },
+  material: { treeKey: 'material', title: '采购部' },
+  cutting: { treeKey: 'cutting', title: '开料班' },
+  painting: { treeKey: 'painting', title: '喷涂班' },
+  inspection: { treeKey: 'inspection', title: '质安组' }
 };
 
 type ProjectCaseFormValues = ProjectCasePayload & {
@@ -119,6 +127,14 @@ export function CaseMatrixPage() {
     setMatrixPage(1);
     setExpandedRowKeys([]);
   }, [searchKeyword, deliveryStatusFilter]);
+
+  useEffect(() => {
+    if (watchedDeliveryStatus !== '已发货') return;
+    const deliveryDate = deliveryForm.getFieldValue('delivery_date');
+    if (!deliveryDate) {
+      deliveryForm.setFieldValue('delivery_date', todayDateString());
+    }
+  }, [deliveryForm, watchedDeliveryStatus]);
 
   const refreshProjectQueries = async () => {
     await Promise.all([
@@ -218,7 +234,7 @@ export function CaseMatrixPage() {
     if (!canManageProjectBasics) return;
     setEditingProject(null);
     form.resetFields();
-    form.setFieldsValue({ associated_month: currentMonth(), items: [{ name: '', delivery_date: null, delivery_status: null, delivery_remark: null }] });
+    form.setFieldsValue(createProjectDefaults(lookupsQuery.data?.owner_trees));
     setProjectModalOpen(true);
   };
   const openEditProject = async (projectCaseId: string) => {
@@ -985,16 +1001,32 @@ type ProjectCaseModalProps = {
 };
 
 function ProjectCaseModal({ open, editingProject, form, lookups, stageDefinitions, loading, onCancel, onFinish }: ProjectCaseModalProps) {
-  const ownerTrees = lookups?.owner_trees ?? {};
+  const ownerTrees = useMemo(() => lookups?.owner_trees ?? EMPTY_OWNER_TREES, [lookups?.owner_trees]);
   const initialFormValues = useMemo(
-    () => editingProject ? projectToForm(editingProject) : createProjectDefaults(),
-    [editingProject]
+    () => editingProject ? projectToForm(editingProject) : createProjectDefaults(ownerTrees),
+    [editingProject, ownerTrees]
   );
   useEffect(() => {
     if (!open) return;
     form.resetFields();
     form.setFieldsValue(initialFormValues);
-  }, [form, initialFormValues, open]);
+  }, [editingProject?.id, form, open]);
+
+  useEffect(() => {
+    if (!open || editingProject) return;
+    const defaults = buildDefaultStageOwnerValues(ownerTrees);
+    const current = form.getFieldValue('stage_owner_values') ?? {};
+    const next = { ...current };
+    let changed = false;
+    for (const [taskType, value] of Object.entries(defaults)) {
+      if (next[taskType]) continue;
+      next[taskType] = value;
+      changed = true;
+    }
+    if (changed) {
+      form.setFieldsValue({ stage_owner_values: next });
+    }
+  }, [editingProject, form, open, ownerTrees]);
 
   return (
     <Modal
@@ -1193,11 +1225,32 @@ function projectToForm(project: ProjectCase): ProjectCaseFormValues {
   };
 }
 
-function createProjectDefaults(): ProjectCaseFormValues {
+function createProjectDefaults(ownerTrees?: LookupResponse['owner_trees']): ProjectCaseFormValues {
   return {
     associated_month: currentMonth(),
-    items: [{ name: '', delivery_date: null, delivery_status: null, delivery_remark: null }]
+    items: [{ name: '', delivery_date: null, delivery_status: null, delivery_remark: null }],
+    stage_owner_values: buildDefaultStageOwnerValues(ownerTrees)
   } as ProjectCaseFormValues;
+}
+
+function buildDefaultStageOwnerValues(ownerTrees?: LookupResponse['owner_trees']) {
+  const result: Record<string, OwnerSelectValue> = {};
+  for (const [taskType, target] of Object.entries(DEFAULT_STAGE_OWNER_TARGETS)) {
+    const node = findOwnerDepartmentNodeByTitle(ownerTrees?.[target.treeKey] ?? [], target.title);
+    if (node) {
+      result[taskType] = buildOwnerSelectValue(node.value, node.title);
+    }
+  }
+  return result;
+}
+
+function findOwnerDepartmentNodeByTitle(nodes: OwnerLookupNode[], title: string): OwnerLookupNode | undefined {
+  for (const node of nodes) {
+    if (node.type === 'department' && node.title === title) return node;
+    const child = node.children ? findOwnerDepartmentNodeByTitle(node.children, title) : undefined;
+    if (child) return child;
+  }
+  return undefined;
 }
 
 function normalizeProjectPayload(values: ProjectCaseFormValues, stages: StageDefinition[]): ProjectCasePayload {
@@ -1263,6 +1316,11 @@ function buildOwnerSelectValue(value: string, label?: string | null): OwnerSelec
 function currentMonth() {
   const date = new Date();
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function todayDateString() {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function stageDefinitionsFromColumns(columns: MatrixColumn[]): StageDefinition[] {
