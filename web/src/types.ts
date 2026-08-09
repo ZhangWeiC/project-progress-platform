@@ -316,6 +316,8 @@ export type WorkflowStage = {
   generation_scope: 'case' | 'item';
   owner_department_name?: string;
   progress_rule: string;
+  required: number;
+  skippable: number;
   subprocesses: WorkflowSubprocess[];
 };
 

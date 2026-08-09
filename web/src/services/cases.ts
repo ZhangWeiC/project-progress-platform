@@ -124,3 +124,9 @@ export const fetchMyTasks = () => apiGet<WorkbenchTask[]>('/api/me/tasks');
 export const fetchMyExceptions = () => apiGet<ExceptionRecord[]>('/api/me/exceptions');
 
 export const fetchWorkflowTemplate = () => apiGet<WorkflowTemplate>('/api/workflow-template');
+
+export const updateWorkflowStageRequirement = (stageId: string, required: boolean) =>
+  apiPatch<{ ok: boolean; id: string; required: boolean; skippable: boolean; updated_item_count: number }>(
+    `/api/workflow-template/stages/${encodeURIComponent(stageId)}`,
+    { required }
+  );

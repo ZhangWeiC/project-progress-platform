@@ -1,9 +1,9 @@
 import { DeleteOutlined, EditOutlined, MinusCircleOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Descriptions, Form, Input, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Card, Descriptions, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { fetchWorkflowTemplate } from '../../services/cases';
+import { fetchWorkflowTemplate, updateWorkflowStageRequirement } from '../../services/cases';
 import { apiDelete, apiGet, apiPatch, apiPost } from '../../services/api';
 import type { WorkflowStage } from '../../types';
 
@@ -16,6 +16,15 @@ export function SettingsPage() {
   const workflowQuery = useQuery({
     queryKey: ['workflow-template'],
     queryFn: fetchWorkflowTemplate
+  });
+  const workflowStageRequirementMutation = useMutation({
+    mutationFn: ({ stageId, required }: { stageId: string; required: boolean }) => updateWorkflowStageRequirement(stageId, required),
+    onSuccess: (result) => {
+      message.success(result.updated_item_count > 0 ? `配置已更新，并补齐 ${result.updated_item_count} 个已发货子项目` : '阶段配置已更新');
+      queryClient.invalidateQueries({ queryKey: ['workflow-template'] });
+      queryClient.invalidateQueries({ queryKey: ['case-matrix'] });
+    },
+    onError: (error) => message.error(error.message)
   });
   const feishuStatusQuery = useQuery({
     queryKey: ['feishu-status'],
@@ -102,7 +111,12 @@ export function SettingsPage() {
               children: workflowQuery.error ? (
                 <Alert type="error" message={workflowQuery.error.message} />
               ) : (
-                <WorkflowTemplateTable rows={workflowQuery.data?.stages ?? []} loading={workflowQuery.isLoading} />
+                <WorkflowTemplateTable
+                  rows={workflowQuery.data?.stages ?? []}
+                  loading={workflowQuery.isLoading}
+                  updatingStageId={workflowStageRequirementMutation.variables?.stageId}
+                  onRequirementChange={(stageId, required) => workflowStageRequirementMutation.mutate({ stageId, required })}
+                />
               )
             },
             {
@@ -523,7 +537,17 @@ function normalizePermissionLevel(level?: string | null): PermissionLevel {
   return 'viewer';
 }
 
-function WorkflowTemplateTable({ rows, loading }: { rows: WorkflowStage[]; loading: boolean }) {
+function WorkflowTemplateTable({
+  rows,
+  loading,
+  updatingStageId,
+  onRequirementChange
+}: {
+  rows: WorkflowStage[];
+  loading: boolean;
+  updatingStageId?: string;
+  onRequirementChange: (stageId: string, required: boolean) => void;
+}) {
   return (
     <Table<WorkflowStage>
       rowKey="id"
@@ -539,6 +563,20 @@ function WorkflowTemplateTable({ rows, loading }: { rows: WorkflowStage[]; loadi
           dataIndex: 'generation_scope',
           width: 110,
           render: (value) => <Tag color={value === 'case' ? 'blue' : 'default'}>{value === 'case' ? '项目级' : '子项目级'}</Tag>
+        },
+        {
+          title: '必要阶段',
+          dataIndex: 'required',
+          width: 110,
+          render: (value, row) => (
+            <Switch
+              size="small"
+              checked={Boolean(value)}
+              loading={updatingStageId === row.id}
+              aria-label={`${row.name}是否为必要阶段`}
+              onChange={(checked) => onRequirementChange(row.id, checked)}
+            />
+          )
         },
         {
           title: '子流程',

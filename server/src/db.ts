@@ -155,6 +155,11 @@ export function initializeDatabase() {
       description TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS schema_migration (
+      key TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS task_template (
       id TEXT PRIMARY KEY,
       case_template_id TEXT NOT NULL,
@@ -408,6 +413,7 @@ export function initializeDatabase() {
   hideLegacyLocalDepartments();
   seedCredentials();
   migrateWorkflowModel();
+  migrateStageRequirementConfig();
   normalizeLegacyFeishuReferences();
   seedProductionPlans();
   migrateWorkLogProductionPlanLink();
@@ -734,6 +740,18 @@ function migrateProjectBulkProgressConfig() {
   db.prepare("UPDATE subtask_template SET allow_project_bulk_update = 1 WHERE id = 'st-drawing-review'").run();
 }
 
+function migrateStageRequirementConfig() {
+  const migrationKey = '2026-08-stage-requirement-config';
+  const applied = db.prepare('SELECT 1 FROM schema_migration WHERE key = ?').get(migrationKey);
+  if (applied) return;
+  const tx = db.transaction(() => {
+    db.prepare("UPDATE task_template SET required = 1, skippable = 0 WHERE task_type IN ('design', 'material', 'cutting', 'production')").run();
+    db.prepare("UPDATE task_template SET required = 0, skippable = 1 WHERE task_type IN ('painting', 'inspection')").run();
+    db.prepare('INSERT INTO schema_migration (key, applied_at) VALUES (?, ?)').run(migrationKey, nowIso());
+  });
+  tx();
+}
+
 function normalizeDeliveryStatusRows(table: 'project_case' | 'case_item') {
   const rows = db.prepare(`SELECT id, delivery_status, delivery_remark FROM ${table}`).all() as Array<{
     id: string;
@@ -827,8 +845,8 @@ function seedDatabase() {
     { id: 'tt-material', case_template_id: 'tpl-steel-v1', name: '材料入库', task_type: 'material', sort_order: 20, generation_scope: 'item', default_owner_department_id: 'dept-material', progress_rule: 'average', required: 1, skippable: 0 },
     { id: 'tt-cutting', case_template_id: 'tpl-steel-v1', name: '开料', task_type: 'cutting', sort_order: 30, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 },
     { id: 'tt-production', case_template_id: 'tpl-steel-v1', name: '装焊', task_type: 'production', sort_order: 40, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 },
-    { id: 'tt-painting', case_template_id: 'tpl-steel-v1', name: '喷涂', task_type: 'painting', sort_order: 50, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 },
-    { id: 'tt-inspection', case_template_id: 'tpl-steel-v1', name: '验收', task_type: 'inspection', sort_order: 60, generation_scope: 'item', default_owner_department_id: 'dept-quality', progress_rule: 'average', required: 1, skippable: 0 }
+    { id: 'tt-painting', case_template_id: 'tpl-steel-v1', name: '喷涂', task_type: 'painting', sort_order: 50, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 0, skippable: 1 },
+    { id: 'tt-inspection', case_template_id: 'tpl-steel-v1', name: '验收', task_type: 'inspection', sort_order: 60, generation_scope: 'item', default_owner_department_id: 'dept-quality', progress_rule: 'average', required: 0, skippable: 1 }
   ]);
 
   insertMany('subtask_template', [
@@ -1157,7 +1175,7 @@ function seedProductionPlans() {
 
 function migrateWorkflowModel() {
   insertMany('task_template', [
-    { id: 'tt-painting', case_template_id: 'tpl-steel-v1', name: '喷涂', task_type: 'painting', sort_order: 50, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 1, skippable: 0 }
+    { id: 'tt-painting', case_template_id: 'tpl-steel-v1', name: '喷涂', task_type: 'painting', sort_order: 50, generation_scope: 'item', default_owner_department_id: 'dept-production', progress_rule: 'average', required: 0, skippable: 1 }
   ]);
   insertMany('subtask_template', [
     { id: 'st-drawing-review', task_template_id: 'tt-design', name: '图纸定审', sort_order: 10, progress_rule: 'manual', required: 1, skippable: 0 }

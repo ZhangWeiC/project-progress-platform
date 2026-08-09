@@ -584,7 +584,7 @@ export function createProjectCase(input: ProjectCaseInput, user: CurrentUser) {
     });
     syncProjectOwnerMembers(id, input.business_owner_id ?? null, input.business_owner_department_id ?? null, input.design_owner_id ?? null, input.design_owner_department_id ?? null);
     ensureProjectTasks(id, stageOwnerInputMap(input.stage_owners), input.design_owner_id ?? null);
-    syncCaseItems(id, input.items ?? [], stageOwnerInputMap(input.stage_owners), input.design_owner_id ?? null);
+    syncCaseItems(id, input.items ?? [], stageOwnerInputMap(input.stage_owners), input.design_owner_id ?? null, user.id);
     if (input.stage_owners) applyStageOwners(id, input.stage_owners);
     syncTaskOwnerMembers(id);
     recalculateCase(id);
@@ -670,7 +670,7 @@ export function updateProjectCase(projectCaseId: string, input: ProjectCaseInput
     });
     syncProjectOwnerMembers(projectCaseId, nextBusinessOwnerId, nextBusinessOwnerDepartmentId, nextDesignOwnerId, nextDesignOwnerDepartmentId);
     ensureProjectTasks(projectCaseId, stageOwnerInputMap(input.stage_owners), nextDesignOwnerId);
-    syncCaseItems(projectCaseId, input.items, input.stage_owners ? stageOwnerInputMap(input.stage_owners) : getCurrentStageOwnerMap(projectCaseId), nextDesignOwnerId);
+    syncCaseItems(projectCaseId, input.items, input.stage_owners ? stageOwnerInputMap(input.stage_owners) : getCurrentStageOwnerMap(projectCaseId), nextDesignOwnerId, user.id);
     if (input.stage_owners) {
       applyStageOwners(projectCaseId, input.stage_owners);
     } else {
@@ -821,13 +821,17 @@ export function updateDeliveryInfo(input: DeliveryInfoInput, user: CurrentUser) 
       err.name = 'NOT_FOUND';
       throw err;
     }
-    db.prepare('UPDATE case_item SET delivery_date = ?, delivery_status = ?, delivery_remark = ? WHERE id = ?').run(
-      deliveryDate,
-      deliveryStatus,
-      deliveryRemark,
-      input.case_item_id
-    );
-    updateProjectDeliverySummary(input.project_case_id);
+    const tx = db.transaction(() => {
+      db.prepare('UPDATE case_item SET delivery_date = ?, delivery_status = ?, delivery_remark = ? WHERE id = ?').run(
+        deliveryDate,
+        deliveryStatus,
+        deliveryRemark,
+        input.case_item_id
+      );
+      if (deliveryStatus === '已发货') completeOptionalStagesForShippedItem(input.case_item_id!, user.id);
+      updateProjectDeliverySummary(input.project_case_id);
+    });
+    tx();
     return { ok: true };
   }
 
@@ -840,6 +844,112 @@ export function updateDeliveryInfo(input: DeliveryInfoInput, user: CurrentUser) 
   db.prepare('UPDATE project_case SET delivery_date = ? WHERE id = ?').run(deliveryDate, input.project_case_id);
   updateProjectDeliverySummary(input.project_case_id);
   return { ok: true };
+}
+
+export function updateWorkflowStageRequirement(stageId: string, required: boolean, user: CurrentUser) {
+  assertCanManageProjects(user);
+  const stage = db.prepare('SELECT id, name FROM task_template WHERE id = ?').get(stageId) as { id: string; name: string } | undefined;
+  if (!stage) {
+    const err = new Error('阶段模板不存在');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+
+  let updatedItemCount = 0;
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE task_template SET required = ?, skippable = ? WHERE id = ?').run(required ? 1 : 0, required ? 0 : 1, stageId);
+    if (!required) {
+      const shippedItems = db.prepare("SELECT id FROM case_item WHERE delivery_status = '已发货'").all() as Array<{ id: string }>;
+      for (const item of shippedItems) {
+        if (completeOptionalStagesForShippedItem(item.id, user.id) > 0) updatedItemCount += 1;
+      }
+    }
+  });
+  tx();
+  return { ok: true, id: stage.id, name: stage.name, required, skippable: !required, updated_item_count: updatedItemCount };
+}
+
+export function reconcileShippedItemsWithStageRequirements(changedBy = 'user-admin') {
+  const shippedItems = db.prepare("SELECT id FROM case_item WHERE delivery_status = '已发货'").all() as Array<{ id: string }>;
+  let updatedItemCount = 0;
+  const tx = db.transaction(() => {
+    for (const item of shippedItems) {
+      if (completeOptionalStagesForShippedItem(item.id, changedBy) > 0) updatedItemCount += 1;
+    }
+  });
+  tx();
+  return { updated_item_count: updatedItemCount };
+}
+
+function completeOptionalStagesForShippedItem(itemId: string, changedBy: string) {
+  const item = db.prepare("SELECT id FROM case_item WHERE id = ? AND delivery_status = '已发货'").get(itemId);
+  if (!item) return 0;
+
+  const tasks = db.prepare(
+    `SELECT t.id, t.status, t.progress
+     FROM case_task t
+     JOIN task_template tt ON tt.id = t.task_template_id
+     WHERE t.case_item_id = ?
+       AND t.is_applicable = 1
+       AND COALESCE(tt.required, 1) = 0`
+  ).all(itemId) as Array<{ id: string; status: string; progress: number }>;
+  if (tasks.length === 0) return 0;
+
+  const changedAt = nowIso();
+  let updatedCount = 0;
+  for (const task of tasks) {
+    const subtasks = db.prepare(
+      `SELECT id, status, progress
+       FROM case_subtask
+       WHERE case_task_id = ?
+         AND is_applicable = 1
+         AND progress < 100`
+    ).all(task.id) as Array<{ id: string; status: string; progress: number }>;
+    for (const subtask of subtasks) {
+      db.prepare("UPDATE case_subtask SET progress = 100, status = 'completed' WHERE id = ?").run(subtask.id);
+      insertAutomaticCompletionLog('subtask', subtask, changedBy, changedAt);
+      updatedCount += 1;
+    }
+
+    const applicableSubtaskCount = db.prepare(
+      'SELECT COUNT(*) as count FROM case_subtask WHERE case_task_id = ? AND is_applicable = 1 AND include_in_progress = 1'
+    ).get(task.id) as { count: number };
+    if (applicableSubtaskCount.count > 0) {
+      if (subtasks.length > 0 || task.progress < 100) {
+        recalculateTask(task.id, changedAt);
+        if (subtasks.length === 0) updatedCount += 1;
+      }
+    } else if (task.progress < 100) {
+      db.prepare("UPDATE case_task SET progress = 100, status = 'completed' WHERE id = ?").run(task.id);
+      updateTaskActualDates(task.id, task.progress, 100, changedAt);
+      insertAutomaticCompletionLog('task', task, changedBy, changedAt);
+      recalculateTask(task.id, changedAt);
+      updatedCount += 1;
+    }
+  }
+  return updatedCount;
+}
+
+function insertAutomaticCompletionLog(
+  targetType: TargetType,
+  target: { id: string; status: string; progress: number },
+  changedBy: string,
+  changedAt: string
+) {
+  db.prepare(
+    `INSERT INTO progress_log
+     (id, target_type, target_id, changed_by, before_status, after_status, before_progress, after_progress, source, reason, remark, created_at)
+     VALUES (@id, @target_type, @target_id, @changed_by, @before_status, 'completed', @before_progress, 100, 'delivery_auto_complete', @reason, '', @created_at)`
+  ).run({
+    id: makeId('PL'),
+    target_type: targetType,
+    target_id: target.id,
+    changed_by: changedBy,
+    before_status: target.status,
+    before_progress: target.progress,
+    reason: '子项目已发货，自动完成非必要阶段',
+    created_at: changedAt
+  });
 }
 
 export function getProjectCaseManageProfile(projectCaseId: string, user: CurrentUser) {
@@ -951,7 +1061,13 @@ function syncProjectOwnerMembers(
   }
 }
 
-function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | undefined, stageOwners: Map<string, StageOwnerValue>, fallbackDesignOwnerId: string | null) {
+function syncCaseItems(
+  projectCaseId: string,
+  items: ProjectCaseItemInput[] | undefined,
+  stageOwners: Map<string, StageOwnerValue>,
+  fallbackDesignOwnerId: string | null,
+  changedBy?: string
+) {
   if (!items) return;
   const existingItems = new Set(
     (db.prepare('SELECT id FROM case_item WHERE project_case_id = ?').all(projectCaseId) as Array<{ id: string }>).map((item) => item.id)
@@ -994,6 +1110,7 @@ function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | un
       );
       retainedItemIds.add(item.id);
       ensureItemTasks(projectCaseId, item.id, stageOwners, fallbackDesignOwnerId);
+      if (nextDeliveryStatus === '已发货' && changedBy) completeOptionalStagesForShippedItem(item.id, changedBy);
       continue;
     }
 
@@ -1016,6 +1133,7 @@ function syncCaseItems(projectCaseId: string, items: ProjectCaseItemInput[] | un
     );
     retainedItemIds.add(itemId);
     ensureItemTasks(projectCaseId, itemId, stageOwners, fallbackDesignOwnerId);
+    if (deliveryStatus === '已发货' && changedBy) completeOptionalStagesForShippedItem(itemId, changedBy);
   }
 
   for (const itemId of existingItems) {

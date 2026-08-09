@@ -23,12 +23,14 @@ import {
   getTaskDetails,
   getWorkSummaryReport,
   getWorkLogPlanItems,
+  reconcileShippedItemsWithStageRequirements,
   updateProjectBulkSubtaskProgress,
   updateProductionPlanItem,
   updateDeliveryInfo,
   updateProgress,
   updateProjectCase,
-  updateProjectMonthOrder
+  updateProjectMonthOrder,
+  updateWorkflowStageRequirement
 } from './services.js';
 import { login, logout } from './auth.js';
 import {
@@ -43,6 +45,7 @@ import {
 } from './feishu.js';
 
 initializeDatabase();
+reconcileShippedItemsWithStageRequirements();
 
 const app = Fastify({ logger: true, trustProxy: true });
 const corsOrigins = process.env.CORS_ORIGIN
@@ -744,6 +747,13 @@ app.get('/api/workflow-template', async () => {
       subprocesses: subtasks.all(stage.id)
     }))
   };
+});
+
+app.patch('/api/workflow-template/stages/:stageId', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { stageId } = z.object({ stageId: z.string().trim().min(1) }).parse(request.params);
+  const { required } = z.object({ required: z.boolean() }).parse(request.body);
+  return updateWorkflowStageRequirement(stageId, required, user);
 });
 
 app.post('/api/import-tasks', async (request, reply) => {
