@@ -43,7 +43,7 @@ export type DeliveryInfoPayload = {
 };
 
 export const updateDeliveryInfo = (payload: DeliveryInfoPayload) =>
-  apiPatch<{ ok: boolean }>('/api/delivery-info', payload);
+  apiPatch<{ ok: boolean; updated_count?: number }>('/api/delivery-info', payload);
 
 export const deleteProjectCase = (caseId: string) =>
   apiDelete<{ ok: boolean }>(`/api/cases/${caseId}`);

@@ -832,7 +832,7 @@ export function updateDeliveryInfo(input: DeliveryInfoInput, user: CurrentUser) 
       updateProjectDeliverySummary(input.project_case_id);
     });
     tx();
-    return { ok: true };
+    return { ok: true, updated_count: 1 };
   }
 
   const project = db.prepare('SELECT id FROM project_case WHERE id = ?').get(input.project_case_id);
@@ -841,9 +841,40 @@ export function updateDeliveryInfo(input: DeliveryInfoInput, user: CurrentUser) 
     err.name = 'NOT_FOUND';
     throw err;
   }
-  db.prepare('UPDATE project_case SET delivery_date = ? WHERE id = ?').run(deliveryDate, input.project_case_id);
-  updateProjectDeliverySummary(input.project_case_id);
-  return { ok: true };
+  if (input.delivery_status === undefined) {
+    db.prepare('UPDATE project_case SET delivery_date = ? WHERE id = ?').run(deliveryDate, input.project_case_id);
+    updateProjectDeliverySummary(input.project_case_id);
+    return { ok: true, updated_count: 0 };
+  }
+  const items = db.prepare(
+    'SELECT id, delivery_date FROM case_item WHERE project_case_id = ? ORDER BY source_row, id'
+  ).all(input.project_case_id) as Array<{ id: string; delivery_date: string | null }>;
+  if (items.length === 0) {
+    const err = new Error('当前项目没有子项目');
+    err.name = 'VALIDATION_ERROR';
+    throw err;
+  }
+
+  const shippedFallbackDate = deliveryStatus === '已发货' ? localDateString() : null;
+  const updateItem = db.prepare(
+    'UPDATE case_item SET delivery_date = ?, delivery_status = ?, delivery_remark = ? WHERE id = ?'
+  );
+  const tx = db.transaction(() => {
+    for (const item of items) {
+      const nextDeliveryDate = deliveryDate
+        ?? (deliveryStatus === '已发货' ? normalizeText(item.delivery_date) ?? shippedFallbackDate : item.delivery_date);
+      updateItem.run(nextDeliveryDate, deliveryStatus, deliveryRemark, item.id);
+      if (deliveryStatus === '已发货') completeRequiredStagesForShippedItem(item.id, user.id);
+    }
+    updateProjectDeliverySummary(input.project_case_id);
+  });
+  tx();
+  return { ok: true, updated_count: items.length };
+}
+
+function localDateString() {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 export function updateWorkflowStageRequirement(stageId: string, required: boolean, user: CurrentUser) {

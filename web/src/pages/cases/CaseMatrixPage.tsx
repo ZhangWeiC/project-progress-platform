@@ -56,6 +56,8 @@ type DeliveryEditorTarget = {
   project_case_id: string;
   case_item_id?: string | null;
   title: string;
+  mode: 'single' | 'bulk';
+  targetCount: number;
 };
 
 type BulkProgressEditorTarget = {
@@ -129,12 +131,12 @@ export function CaseMatrixPage() {
   }, [searchKeyword, deliveryStatusFilter]);
 
   useEffect(() => {
-    if (watchedDeliveryStatus !== '已发货') return;
+    if (watchedDeliveryStatus !== '已发货' || deliveryEditor?.mode === 'bulk') return;
     const deliveryDate = deliveryForm.getFieldValue('delivery_date');
     if (!deliveryDate) {
       deliveryForm.setFieldValue('delivery_date', todayDateString());
     }
-  }, [deliveryForm, watchedDeliveryStatus]);
+  }, [deliveryEditor?.mode, deliveryForm, watchedDeliveryStatus]);
 
   const refreshProjectQueries = async () => {
     await Promise.all([
@@ -182,8 +184,10 @@ export function CaseMatrixPage() {
   });
   const deliveryMutation = useMutation({
     mutationFn: updateDeliveryInfo,
-    onSuccess: async () => {
-      message.success('发货信息已更新');
+    onSuccess: async (result) => {
+      message.success(deliveryEditor?.mode === 'bulk'
+        ? `已批量更新 ${result.updated_count} 个子项目的发货信息`
+        : '发货信息已更新');
       setDeliveryEditor(null);
       deliveryForm.resetFields();
       await refreshProjectQueries();
@@ -261,15 +265,18 @@ export function CaseMatrixPage() {
     }
   };
   const openDeliveryEditor = (row: MatrixRow) => {
-    if (!canManageProjects || row.row_type !== 'item') return;
-    const title = String(row.cells.project_item_name?.value ?? row.cells.case_item_name?.value ?? '子项目');
+    if (!canManageProjects || (row.row_type !== 'project' && row.row_type !== 'item')) return;
+    const isBulk = row.row_type === 'project';
+    const title = String(row.cells.project_item_name?.value ?? row.cells.case_item_name?.value ?? (isBulk ? '项目' : '子项目'));
     setDeliveryEditor({
       project_case_id: row.project_case_id,
-      case_item_id: row.case_item_id,
-      title
+      case_item_id: isBulk ? null : row.case_item_id,
+      title,
+      mode: isBulk ? 'bulk' : 'single',
+      targetCount: isBulk ? row.children?.length ?? 0 : 1
     });
     deliveryForm.setFieldsValue({
-      delivery_date: stringCellValue(row.cells.delivery_date),
+      delivery_date: isBulk ? null : stringCellValue(row.cells.delivery_date),
       delivery_status: stringCellValue(row.cells.delivery_status),
       delivery_remark: row.cells.delivery_status?.deliveryRemark ?? null
     });
@@ -277,7 +284,8 @@ export function CaseMatrixPage() {
   const submitDeliveryForm = (values: DeliveryFormValues) => {
     if (!deliveryEditor) return;
     deliveryMutation.mutate({
-      ...deliveryEditor,
+      project_case_id: deliveryEditor.project_case_id,
+      case_item_id: deliveryEditor.case_item_id,
       delivery_date: values.delivery_date ?? null,
       delivery_status: values.delivery_status ?? null,
       delivery_remark: values.delivery_status === '其他' ? values.delivery_remark ?? null : null
@@ -507,7 +515,7 @@ export function CaseMatrixPage() {
         </Space>
       </Modal>
       <Modal
-        title={`编辑发货信息 - ${deliveryEditor?.title ?? ''}`}
+        title={`${deliveryEditor?.mode === 'bulk' ? '批量更新发货情况' : '编辑发货信息'} - ${deliveryEditor?.title ?? ''}`}
         open={Boolean(deliveryEditor)}
         onCancel={() => {
           setDeliveryEditor(null);
@@ -519,6 +527,11 @@ export function CaseMatrixPage() {
         destroyOnClose
       >
         <Form form={deliveryForm} layout="vertical" onFinish={submitDeliveryForm}>
+          {deliveryEditor?.mode === 'bulk' && (
+            <Typography.Paragraph type="secondary">
+              将统一更新 {deliveryEditor.targetCount} 个子项目。发货时间留空时保留已有日期；选择“已发货”后，无日期的子项目自动填入当天。
+            </Typography.Paragraph>
+          )}
           <Form.Item label="发货时间" name="delivery_date">
             <Input placeholder="YYYY-MM-DD" />
           </Form.Item>
@@ -931,10 +944,10 @@ function DeliveryInfoCell({
     : value
       ? <EllipsisText text={String(value)} />
       : <span className="empty-cell">-</span>;
-  const canEditCell = editable && row.row_type === 'item';
+  const canEditCell = editable && (row.row_type === 'item' || (row.row_type === 'project' && columnKey === 'delivery_status'));
   if (!canEditCell) return content;
   return (
-    <Tooltip title="点击编辑发货信息">
+    <Tooltip title={row.row_type === 'project' ? '点击批量更新全部子项目的发货情况' : '点击编辑发货信息'}>
       <button type="button" className="matrix-editable-text-cell" onClick={() => onEdit(row)}>
         {content}
       </button>
