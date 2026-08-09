@@ -828,7 +828,7 @@ export function updateDeliveryInfo(input: DeliveryInfoInput, user: CurrentUser) 
         deliveryRemark,
         input.case_item_id
       );
-      if (deliveryStatus === '已发货') completeOptionalStagesForShippedItem(input.case_item_id!, user.id);
+      if (deliveryStatus === '已发货') completeRequiredStagesForShippedItem(input.case_item_id!, user.id);
       updateProjectDeliverySummary(input.project_case_id);
     });
     tx();
@@ -858,10 +858,10 @@ export function updateWorkflowStageRequirement(stageId: string, required: boolea
   let updatedItemCount = 0;
   const tx = db.transaction(() => {
     db.prepare('UPDATE task_template SET required = ?, skippable = ? WHERE id = ?').run(required ? 1 : 0, required ? 0 : 1, stageId);
-    if (!required) {
+    if (required) {
       const shippedItems = db.prepare("SELECT id FROM case_item WHERE delivery_status = '已发货'").all() as Array<{ id: string }>;
       for (const item of shippedItems) {
-        if (completeOptionalStagesForShippedItem(item.id, user.id) > 0) updatedItemCount += 1;
+        if (completeRequiredStagesForShippedItem(item.id, user.id) > 0) updatedItemCount += 1;
       }
     }
   });
@@ -874,14 +874,14 @@ export function reconcileShippedItemsWithStageRequirements(changedBy = 'user-adm
   let updatedItemCount = 0;
   const tx = db.transaction(() => {
     for (const item of shippedItems) {
-      if (completeOptionalStagesForShippedItem(item.id, changedBy) > 0) updatedItemCount += 1;
+      if (completeRequiredStagesForShippedItem(item.id, changedBy) > 0) updatedItemCount += 1;
     }
   });
   tx();
   return { updated_item_count: updatedItemCount };
 }
 
-function completeOptionalStagesForShippedItem(itemId: string, changedBy: string) {
+function completeRequiredStagesForShippedItem(itemId: string, changedBy: string) {
   const item = db.prepare("SELECT id FROM case_item WHERE id = ? AND delivery_status = '已发货'").get(itemId);
   if (!item) return 0;
 
@@ -891,7 +891,7 @@ function completeOptionalStagesForShippedItem(itemId: string, changedBy: string)
      JOIN task_template tt ON tt.id = t.task_template_id
      WHERE t.case_item_id = ?
        AND t.is_applicable = 1
-       AND COALESCE(tt.required, 1) = 0`
+       AND COALESCE(tt.required, 1) = 1`
   ).all(itemId) as Array<{ id: string; status: string; progress: number }>;
   if (tasks.length === 0) return 0;
 
@@ -939,7 +939,7 @@ function insertAutomaticCompletionLog(
   db.prepare(
     `INSERT INTO progress_log
      (id, target_type, target_id, changed_by, before_status, after_status, before_progress, after_progress, source, reason, remark, created_at)
-     VALUES (@id, @target_type, @target_id, @changed_by, @before_status, 'completed', @before_progress, 100, 'delivery_auto_complete', @reason, '', @created_at)`
+     VALUES (@id, @target_type, @target_id, @changed_by, @before_status, 'completed', @before_progress, 100, 'delivery_required_stage_complete', @reason, '', @created_at)`
   ).run({
     id: makeId('PL'),
     target_type: targetType,
@@ -947,7 +947,7 @@ function insertAutomaticCompletionLog(
     changed_by: changedBy,
     before_status: target.status,
     before_progress: target.progress,
-    reason: '子项目已发货，自动完成非必要阶段',
+    reason: '子项目已发货，自动完成必要阶段',
     created_at: changedAt
   });
 }
@@ -1110,7 +1110,7 @@ function syncCaseItems(
       );
       retainedItemIds.add(item.id);
       ensureItemTasks(projectCaseId, item.id, stageOwners, fallbackDesignOwnerId);
-      if (nextDeliveryStatus === '已发货' && changedBy) completeOptionalStagesForShippedItem(item.id, changedBy);
+      if (nextDeliveryStatus === '已发货' && changedBy) completeRequiredStagesForShippedItem(item.id, changedBy);
       continue;
     }
 
@@ -1133,7 +1133,7 @@ function syncCaseItems(
     );
     retainedItemIds.add(itemId);
     ensureItemTasks(projectCaseId, itemId, stageOwners, fallbackDesignOwnerId);
-    if (deliveryStatus === '已发货' && changedBy) completeOptionalStagesForShippedItem(itemId, changedBy);
+    if (deliveryStatus === '已发货' && changedBy) completeRequiredStagesForShippedItem(itemId, changedBy);
   }
 
   for (const itemId of existingItems) {
