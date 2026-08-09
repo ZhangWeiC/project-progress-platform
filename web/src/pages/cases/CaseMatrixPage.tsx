@@ -942,7 +942,9 @@ function DeliveryInfoCell({
   const content = columnKey === 'delivery_status'
     ? <DeliveryStatusDisplay status={value ? String(value) : ''} remark={cell?.deliveryRemark ?? null} />
     : value
-      ? <EllipsisText text={String(value)} />
+      ? row.row_type === 'item'
+        ? <Typography.Text className="matrix-ellipsis-text">{String(value)}</Typography.Text>
+        : <EllipsisText text={String(value)} />
       : <span className="empty-cell">-</span>;
   const canEditCell = editable && (row.row_type === 'item' || (row.row_type === 'project' && columnKey === 'delivery_status'));
   if (!canEditCell) return content;
