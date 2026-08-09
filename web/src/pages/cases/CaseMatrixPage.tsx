@@ -355,7 +355,7 @@ export function CaseMatrixPage() {
   };
 
   const tableColumns = useMemo(
-    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjectBasics, openDeliveryEditor, openEditProject, openProjectProgressLogs, openBulkProgressEditor),
+    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjectBasics, openDeliveryEditor, openEditProject, openBulkProgressEditor),
     [matrixQuery.data?.columns, canManageProjectBasics, openBulkProgressEditor]
   );
 
@@ -441,6 +441,10 @@ export function CaseMatrixPage() {
                   if (canManageProjectBasics && row.case_item_id) {
                     deleteItemMutation.mutate({ caseId: row.project_case_id, itemId: row.case_item_id });
                   }
+                }}
+                onOpenProjectLogs={(row) => {
+                  const projectName = String(row.cells.project_item_name?.value ?? row.cells.case_name?.value ?? '项目');
+                  openProjectProgressLogs(row.project_case_id, projectName);
                 }}
               />
             )
@@ -597,6 +601,7 @@ type MatrixExpandIconProps = {
   deleteItemLoading: boolean;
   onDeleteProject: (row: MatrixRow) => void;
   onDeleteItem: (row: MatrixRow) => void;
+  onOpenProjectLogs: (row: MatrixRow) => void;
 };
 
 function MatrixExpandIcon({
@@ -607,7 +612,8 @@ function MatrixExpandIcon({
   deleteProjectLoading,
   deleteItemLoading,
   onDeleteProject,
-  onDeleteItem
+  onDeleteItem,
+  onOpenProjectLogs
 }: MatrixExpandIconProps) {
   if (record.row_type === 'item') {
     if (!canManageProjectBasics || !record.case_item_id) return <span className="matrix-expand-spacer" />;
@@ -645,7 +651,7 @@ function MatrixExpandIcon({
   const hasChildren = Boolean(record.children?.length);
 
   return (
-    <span className="matrix-row-action-stack">
+    <span className="matrix-row-action-stack matrix-project-action-stack">
       {hasChildren ? (
         <Tooltip title={expanded ? '折叠子项目' : '展开子项目'}>
           <Button
@@ -660,27 +666,30 @@ function MatrixExpandIcon({
       ) : (
         <span className="matrix-row-action-placeholder" />
       )}
-      {canManageProjectBasics && (
-        <Popconfirm
-          title="删除项目"
-          description={`确认删除「${projectName}」？会同时删除子项目、任务、日报和排期。`}
-          okText="删除"
-          cancelText="取消"
-          okButtonProps={{ danger: true, loading: deleteProjectLoading }}
-          onConfirm={() => onDeleteProject(record)}
-        >
-          <Button
-            type="text"
-            size="small"
-            danger
-            className="matrix-row-action-button"
-            icon={<DeleteOutlined />}
-            aria-label="删除项目"
-            loading={deleteProjectLoading}
-            onClick={(event) => event.stopPropagation()}
-          />
-        </Popconfirm>
-      )}
+      <span className="matrix-project-secondary-actions">
+        {canManageProjectBasics && (
+          <Popconfirm
+            title="删除项目"
+            description={`确认删除「${projectName}」？会同时删除子项目、任务、日报和排期。`}
+            okText="删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true, loading: deleteProjectLoading }}
+            onConfirm={() => onDeleteProject(record)}
+          >
+            <Button
+              type="text"
+              size="small"
+              danger
+              className="matrix-row-action-button"
+              icon={<DeleteOutlined />}
+              aria-label="删除项目"
+              loading={deleteProjectLoading}
+              onClick={(event) => event.stopPropagation()}
+            />
+          </Popconfirm>
+        )}
+        <ProjectLogButton onClick={() => onOpenProjectLogs(record)} />
+      </span>
     </span>
   );
 }
@@ -802,7 +811,6 @@ function buildColumns(
   canManageProjectBasics: boolean,
   onEditDelivery: (row: MatrixRow) => void,
   onEditProject: (projectCaseId: string) => void,
-  onOpenProjectLogs: (projectCaseId: string, projectName: string) => void,
   onBulkProgressEdit: (row: MatrixRow, column: MatrixColumn, cell: MatrixCell) => void
 ): ColumnsType<MatrixRow> {
   const leftColumns = columns
@@ -814,7 +822,7 @@ function buildColumns(
       fixed: 'left' as const,
       width: column.key === 'project_item_name' ? 380 : column.key === 'case_name' ? 250 : 190,
       className: `matrix-fixed-left matrix-column-${column.key}`,
-      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row, { canManageProjectBasics, onEditProject, onOpenProjectLogs })
+      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row, { canManageProjectBasics, onEditProject })
     }));
 
   const rightColumns = columns
@@ -826,7 +834,7 @@ function buildColumns(
       fixed: 'right' as const,
       width: 70,
       className: 'matrix-fixed-right',
-      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row, { canManageProjectBasics, onEditProject, onOpenProjectLogs })
+      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row, { canManageProjectBasics, onEditProject })
     }));
 
   const groups = new Map<string, MatrixColumn[]>();
@@ -882,7 +890,6 @@ function renderPinnedCell(
   context: {
     canManageProjectBasics: boolean;
     onEditProject: (projectCaseId: string) => void;
-    onOpenProjectLogs: (projectCaseId: string, projectName: string) => void;
   }
 ) {
   const cell = row.cells[key];
@@ -913,9 +920,6 @@ function renderPinnedCell(
           ) : (
             <EllipsisText text={text} strong={row.row_type === 'project'} />
           )}
-          {row.row_type === 'project' && (
-            <ProjectLogButton onClick={() => context.onOpenProjectLogs(row.project_case_id, text)} />
-          )}
         </div>
         {secondary && <EllipsisText text={secondary} type="secondary" />}
       </Space>
@@ -933,9 +937,6 @@ function renderPinnedCell(
             <ProjectTitleButton text={text} onClick={() => context.onEditProject(row.project_case_id)} />
           ) : (
             <EllipsisText text={text} strong={row.row_type === 'project'} />
-          )}
-          {row.row_type === 'project' && (
-            <ProjectLogButton onClick={() => context.onOpenProjectLogs(row.project_case_id, text)} />
           )}
         </div>
         {row.row_type === 'project' && cell?.ownerName && (

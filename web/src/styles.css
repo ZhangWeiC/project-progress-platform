@@ -307,11 +307,6 @@ body {
 }
 
 .matrix-project-log-button.ant-btn {
-  flex: none;
-  width: 22px;
-  min-width: 22px;
-  height: 22px;
-  padding: 0;
   color: #64748b;
 }
 
@@ -383,6 +378,18 @@ body {
   gap: 2px;
   margin-right: 4px;
   vertical-align: middle;
+}
+
+.matrix-project-action-stack {
+  width: 38px;
+  align-items: flex-start;
+}
+
+.matrix-project-secondary-actions {
+  display: inline-flex;
+  width: 38px;
+  align-items: center;
+  gap: 2px;
 }
 
 .matrix-row-action-button.ant-btn {
