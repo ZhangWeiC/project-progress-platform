@@ -2066,13 +2066,15 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
 function buildItemMatrixRow(project: MatrixProject, item: MatrixItem, caseTasks: MatrixTask[], templates: MatrixTemplateColumn[], user: CurrentUser): MatrixRow {
   const itemTasks = getMatrixTasks(project.id, item.id);
   const tasks = [...caseTasks, ...itemTasks];
+  const deliveryEditable = canManageProjects(user);
   const cells: Record<string, MatrixCell> = {
     project_item_name: { value: item.name, status: item.status, aggregateCount: Math.round(item.progress) },
     case_name: { value: '', ownerName: businessOwnerLabel(project.business_owner_name) },
     case_item_name: { value: item.name, status: item.status, aggregateCount: Math.round(item.progress) },
-    delivery_date: { value: item.delivery_date ?? '' },
+    delivery_date: { value: item.delivery_date ?? '', editable: deliveryEditable },
     delivery_status: {
       value: normalizeDeliveryStatus(item.delivery_status) ?? '',
+      editable: deliveryEditable,
       deliveryRemark: normalizeDeliveryRemark(normalizeDeliveryStatus(item.delivery_status), item.delivery_remark, item.delivery_status)
     }
   };
@@ -2242,6 +2244,7 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
   ];
 
   const caseTasks = getMatrixTasks(projectCaseId, null);
+  const deliveryEditable = canManageProjects(user);
 
   const rows = items.map((item) => {
     const itemTasks = getMatrixTasks(projectCaseId, item.id);
@@ -2251,9 +2254,10 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
       case_item_name: { value: item.name },
       business_owner_name: { value: projectCase.business_owner_name ?? '' },
       design_owner_name: { value: projectCase.design_owner_name ?? '' },
-      delivery_date: { value: item.delivery_date ?? '' },
+      delivery_date: { value: item.delivery_date ?? '', editable: deliveryEditable },
       delivery_status: {
         value: normalizeDeliveryStatus(item.delivery_status) ?? '',
+        editable: deliveryEditable,
         deliveryRemark: normalizeDeliveryRemark(normalizeDeliveryStatus(item.delivery_status), item.delivery_remark, item.delivery_status)
       }
     };

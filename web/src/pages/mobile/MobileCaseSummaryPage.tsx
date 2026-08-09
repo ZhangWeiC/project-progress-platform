@@ -1,9 +1,9 @@
-import { LockOutlined } from '@ant-design/icons';
-import { Button, Card, Drawer, Empty, InputNumber, Progress, Space, Tag, Typography, message } from 'antd';
+import { LockOutlined, RightOutlined, TruckOutlined } from '@ant-design/icons';
+import { Button, Card, Drawer, Empty, Form, Input, InputNumber, Progress, Select, Space, Tag, Typography, message } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { fetchCaseMatrix, updateSubtaskProgress, updateTaskProgress } from '../../services/cases';
+import { fetchCaseMatrix, updateDeliveryInfo, updateSubtaskProgress, updateTaskProgress } from '../../services/cases';
 import type { MatrixCell, MatrixColumn, MatrixRow } from '../../types';
 
 const DELIVERY_STATUS_COLORS: Record<string, string> = {
@@ -13,10 +13,24 @@ const DELIVERY_STATUS_COLORS: Record<string, string> = {
   发货中: 'processing',
   其他: 'purple'
 };
+const DELIVERY_STATUS_OPTIONS = [
+  { label: '已发货', value: '已发货' },
+  { label: '未发货', value: '未发货' },
+  { label: '待发货', value: '待发货' },
+  { label: '发货中', value: '发货中' },
+  { label: '其他', value: '其他' }
+];
+
+type DeliveryFormValues = {
+  delivery_date?: string | null;
+  delivery_status?: string | null;
+  delivery_remark?: string | null;
+};
 
 export function MobileCaseSummaryPage() {
   const { id } = useParams();
   const [editingStage, setEditingStage] = useState<StageEditingState | null>(null);
+  const [editingDelivery, setEditingDelivery] = useState<MatrixRow | null>(null);
   const query = useQuery({ queryKey: ['matrix', id], queryFn: () => fetchCaseMatrix(id!), enabled: Boolean(id) });
   const projectCase = query.data?.projectCase;
   const itemRows = collectItemRows(query.data?.rows ?? []);
@@ -42,9 +56,16 @@ export function MobileCaseSummaryPage() {
         </Card>
       )}
       {itemRows.map((row) => (
-        <ItemCard key={row.case_item_id || row.row_id} row={row} columns={progressColumns} onEditStage={(column, cell) => setEditingStage({ row, column, cell })} />
+        <ItemCard
+          key={row.case_item_id || row.row_id}
+          row={row}
+          columns={progressColumns}
+          onEditStage={(column, cell) => setEditingStage({ row, column, cell })}
+          onEditDelivery={() => setEditingDelivery(row)}
+        />
       ))}
       <StageProgressDrawer projectCaseId={id} stage={editingStage} open={Boolean(editingStage)} onClose={() => setEditingStage(null)} />
+      <DeliveryInfoDrawer projectCaseId={id} row={editingDelivery} open={Boolean(editingDelivery)} onClose={() => setEditingDelivery(null)} />
     </Space>
   );
 }
@@ -58,11 +79,13 @@ type StageEditingState = {
 function ItemCard({
   row,
   columns,
-  onEditStage
+  onEditStage,
+  onEditDelivery
 }: {
   row: MatrixRow;
   columns: MatrixColumn[];
   onEditStage: (column: MatrixColumn, cell: MatrixCell) => void;
+  onEditDelivery: () => void;
 }) {
   const title = cellText(row.cells.project_item_name) || cellText(row.cells.case_item_name) || '未命名子项目';
   const deliveryStatus = cellText(row.cells.delivery_status);
@@ -70,47 +93,152 @@ function ItemCard({
   const stages = columns
     .map((column) => ({ column, cell: row.cells[column.key] }))
     .filter(({ cell }) => cell && cell.value !== null && cell.value !== undefined);
+  const stageGroups = groupStages(stages);
+  const deliveryEditable = Boolean(row.cells.delivery_status?.editable);
 
   return (
     <Card size="small" className="mobile-card">
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
         <div className="mobile-project-title-row">
           <Typography.Text strong className="mobile-card-title">{title}</Typography.Text>
-          {deliveryStatus && <Tag color={DELIVERY_STATUS_COLORS[deliveryStatus] ?? 'default'}>{deliveryStatus}</Tag>}
         </div>
         <Progress percent={Math.round(Number(row.item_progress ?? 0))} size="small" />
-        {(deliveryStatus || deliveryDate) && (
-          <Typography.Text type="secondary" className="mobile-muted-line">
-            {[deliveryDate ? `发货：${deliveryDate}` : null, deliveryStatus].filter(Boolean).join(' · ')}
-          </Typography.Text>
-        )}
-        {stages.length > 0 && (
-          <div className="mobile-stage-grid">
-            {stages.map(({ column, cell }) => {
-              const editable = canEditStage(cell);
-              return (
-                <button
-                  key={column.key}
-                  type="button"
-                  className={`mobile-stage-button ${editable ? 'is-editable' : 'is-locked'}`}
-                  disabled={!editable}
-                  onClick={() => onEditStage(column, cell)}
-                >
-                  <span className="mobile-stage-main">
-                    <span className="mobile-stage-name">{column.title}</span>
-                    <strong>{progressText(cell)}%</strong>
-                  </span>
-                  <span className="mobile-stage-owner">
-                    {stageOwnerText(cell)}
-                    {!editable && <LockOutlined />}
-                  </span>
-                </button>
-              );
-            })}
+        <button
+          type="button"
+          className={`mobile-delivery-summary ${deliveryEditable ? 'is-editable' : 'is-locked'}`}
+          disabled={!deliveryEditable}
+          onClick={onEditDelivery}
+        >
+          <span className="mobile-delivery-label"><TruckOutlined />发货信息</span>
+          <span className="mobile-delivery-value">
+            {deliveryDate && <span>{deliveryDate}</span>}
+            {deliveryStatus
+              ? <Tag color={DELIVERY_STATUS_COLORS[deliveryStatus] ?? 'default'}>{deliveryStatus}</Tag>
+              : <span className="mobile-delivery-empty">未设置</span>}
+            {deliveryEditable && <RightOutlined />}
+          </span>
+        </button>
+        {stageGroups.length > 0 && (
+          <div className="mobile-stage-groups">
+            {stageGroups.map((group, groupIndex) => (
+              <section key={group.name} className={`mobile-stage-group tone-${groupIndex % 6}`}>
+                <div className="mobile-stage-group-title">{group.name}</div>
+                <div className="mobile-stage-grid">
+                  {group.stages.map(({ column, cell }) => {
+                    const editable = canEditStage(cell);
+                    return (
+                      <button
+                        key={column.key}
+                        type="button"
+                        className={`mobile-stage-button ${editable ? 'is-editable' : 'is-locked'}`}
+                        disabled={!editable}
+                        onClick={() => onEditStage(column, cell)}
+                      >
+                        <span className="mobile-stage-main">
+                          <span className="mobile-stage-name">{column.title}</span>
+                          <strong>{progressText(cell)}%</strong>
+                        </span>
+                        <span className="mobile-stage-owner">
+                          {stageOwnerText(cell)}
+                          {!editable && <LockOutlined />}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </div>
         )}
       </Space>
     </Card>
+  );
+}
+
+function DeliveryInfoDrawer({
+  projectCaseId,
+  row,
+  open,
+  onClose
+}: {
+  projectCaseId?: string;
+  row: MatrixRow | null;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [form] = Form.useForm<DeliveryFormValues>();
+  const queryClient = useQueryClient();
+  const watchedStatus = Form.useWatch('delivery_status', form);
+  const itemName = row ? cellText(row.cells.case_item_name) || cellText(row.cells.project_item_name) || '未命名子项目' : '';
+  const mutation = useMutation({
+    mutationFn: (values: DeliveryFormValues) => {
+      if (!row) throw new Error('子项目不存在');
+      return updateDeliveryInfo({
+        project_case_id: row.project_case_id,
+        case_item_id: row.case_item_id,
+        delivery_date: values.delivery_date ?? null,
+        delivery_status: values.delivery_status ?? null,
+        delivery_remark: values.delivery_status === '其他' ? values.delivery_remark ?? null : null
+      });
+    },
+    onSuccess: async () => {
+      message.success('发货信息已更新');
+      onClose();
+      await Promise.all([
+        projectCaseId ? queryClient.invalidateQueries({ queryKey: ['matrix', projectCaseId] }) : Promise.resolve(),
+        queryClient.invalidateQueries({ queryKey: ['matrix', 'all'] }),
+        queryClient.invalidateQueries({ queryKey: ['mobile-matrix'] })
+      ]);
+    },
+    onError: (error) => message.error(error.message)
+  });
+
+  useEffect(() => {
+    if (!row) {
+      form.resetFields();
+      return;
+    }
+    form.setFieldsValue({
+      delivery_date: cellText(row.cells.delivery_date) || null,
+      delivery_status: cellText(row.cells.delivery_status) || null,
+      delivery_remark: row.cells.delivery_status?.deliveryRemark ?? null
+    });
+  }, [form, row]);
+
+  useEffect(() => {
+    if (watchedStatus !== '已发货' || form.getFieldValue('delivery_date')) return;
+    form.setFieldValue('delivery_date', todayDateString());
+  }, [form, watchedStatus]);
+
+  return (
+    <Drawer
+      title="编辑发货信息"
+      placement="bottom"
+      height="62vh"
+      open={open}
+      onClose={onClose}
+      className="mobile-progress-drawer"
+    >
+      {row && (
+        <Form form={form} layout="vertical" onFinish={(values) => mutation.mutate(values)}>
+          <Typography.Text strong className="mobile-delivery-item-name">{itemName}</Typography.Text>
+          <Form.Item label="发货情况" name="delivery_status">
+            <Select allowClear placeholder="请选择发货情况" options={DELIVERY_STATUS_OPTIONS} />
+          </Form.Item>
+          <Form.Item label="发货时间" name="delivery_date">
+            <Input placeholder="YYYY-MM-DD" />
+          </Form.Item>
+          {watchedStatus === '其他' && (
+            <Form.Item label="备注" name="delivery_remark">
+              <Input.TextArea placeholder="补充说明其他发货情况" autoSize={{ minRows: 2, maxRows: 4 }} />
+            </Form.Item>
+          )}
+          <Button type="primary" htmlType="submit" block size="large" loading={mutation.isPending}>
+            保存
+          </Button>
+        </Form>
+      )}
+    </Drawer>
   );
 }
 
@@ -256,4 +384,18 @@ function canEditStage(cell?: MatrixCell) {
 function stageOwnerText(cell?: MatrixCell) {
   const owners = Array.from(new Set([cell?.ownerName, cell?.departmentName].filter(Boolean)));
   return owners.join(' / ') || '未设置负责人';
+}
+
+function groupStages(stages: Array<{ column: MatrixColumn; cell: MatrixCell }>) {
+  const groups = new Map<string, Array<{ column: MatrixColumn; cell: MatrixCell }>>();
+  for (const stage of stages) {
+    const name = stage.column.group || '其他';
+    groups.set(name, [...(groups.get(name) ?? []), stage]);
+  }
+  return Array.from(groups.entries()).map(([name, groupStages]) => ({ name, stages: groupStages }));
+}
+
+function todayDateString() {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
