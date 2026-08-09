@@ -31,6 +31,18 @@ export function canEditProgress(user: CurrentUser) {
   return canManageProjects(user) || user.permission_level === 'editor';
 }
 
+export function canEditProjectDelivery(user: CurrentUser, projectCaseId: string) {
+  if (canManageProjects(user)) return true;
+  return canEditProgress(user) && isCaseTaskOwner(user, projectCaseId);
+}
+
+export function assertCanEditProjectDelivery(user: CurrentUser, projectCaseId: string) {
+  if (canEditProjectDelivery(user, projectCaseId)) return;
+  const err = new Error('当前用户不能编辑该项目的发货信息');
+  err.name = 'PERMISSION_DENIED';
+  throw err;
+}
+
 export function assertCanManageProjects(user: CurrentUser) {
   if (canManageProjects(user)) return;
   const err = new Error('当前用户不能管理项目');
@@ -102,16 +114,26 @@ function canAccessCaseByOwner(user: CurrentUser, projectCaseId: string) {
   if (project.business_owner_department_id && canLeadDepartmentOrAncestor(user.id, project.business_owner_department_id)) return true;
   if (project.design_owner_department_id && canLeadDepartmentOrAncestor(user.id, project.design_owner_department_id)) return true;
 
+  return isCaseTaskOwner(user, projectCaseId);
+}
+
+function isCaseTaskOwner(user: CurrentUser, projectCaseId: string) {
   const tasks = db
     .prepare('SELECT assignee_id, team_id, owner_department_id FROM case_task WHERE project_case_id = ?')
     .all(projectCaseId) as Array<{ assignee_id: string | null; team_id: string | null; owner_department_id: string | null }>;
+  const departmentIds = new Set<string>();
+  const teamIds = new Set<string>();
   for (const task of tasks) {
     if (task.assignee_id === user.id) return true;
-    if (task.owner_department_id && canLeadDepartmentOrAncestor(user.id, task.owner_department_id)) return true;
-    if (task.team_id) {
-      const team = db.prepare('SELECT 1 FROM team WHERE id = ? AND leader_id = ?').get(task.team_id, user.id);
-      if (team) return true;
-    }
+    if (task.owner_department_id) departmentIds.add(task.owner_department_id);
+    if (task.team_id) teamIds.add(task.team_id);
+  }
+  for (const departmentId of departmentIds) {
+    if (canLeadDepartmentOrAncestor(user.id, departmentId)) return true;
+  }
+  for (const teamId of teamIds) {
+    const team = db.prepare('SELECT 1 FROM team WHERE id = ? AND leader_id = ?').get(teamId, user.id);
+    if (team) return true;
   }
   return false;
 }
@@ -810,7 +832,7 @@ export function updateProjectMonthOrder(user: CurrentUser, associatedMonth: stri
 }
 
 export function updateDeliveryInfo(input: DeliveryInfoInput, user: CurrentUser) {
-  assertCanManageProjects(user);
+  assertCanEditProjectDelivery(user, input.project_case_id);
   const deliveryDate = normalizeText(input.delivery_date);
   const deliveryStatus = normalizeDeliveryStatus(input.delivery_status);
   const deliveryRemark = normalizeDeliveryRemark(deliveryStatus, input.delivery_remark, input.delivery_status);
@@ -1991,7 +2013,8 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
     )
     .all(project.id) as MatrixItem[];
   const caseTasks = getMatrixTasks(project.id, null);
-  const children = items.map((item) => buildItemMatrixRow(project, item, caseTasks, templates, user));
+  const deliveryEditable = canEditProjectDelivery(user, project.id);
+  const children = items.map((item) => buildItemMatrixRow(project, item, caseTasks, templates, user, deliveryEditable));
   const deliverySummary = aggregateDeliveryStatus(items);
   const cells: Record<string, MatrixCell> = {
     project_item_name: {
@@ -2010,8 +2033,8 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
       value: `${children.length} 个子项目`,
       status: project.status
     },
-    delivery_date: { value: aggregateDeliveryDateRange(items) },
-    delivery_status: { value: deliverySummary.status ?? '', deliveryRemark: deliverySummary.remark }
+    delivery_date: { value: aggregateDeliveryDateRange(items), editable: deliveryEditable },
+    delivery_status: { value: deliverySummary.status ?? '', editable: deliveryEditable, deliveryRemark: deliverySummary.remark }
   };
 
   for (const template of templates) {
@@ -2063,10 +2086,16 @@ function buildProjectMatrixRow(project: MatrixProject, templates: MatrixTemplate
   };
 }
 
-function buildItemMatrixRow(project: MatrixProject, item: MatrixItem, caseTasks: MatrixTask[], templates: MatrixTemplateColumn[], user: CurrentUser): MatrixRow {
+function buildItemMatrixRow(
+  project: MatrixProject,
+  item: MatrixItem,
+  caseTasks: MatrixTask[],
+  templates: MatrixTemplateColumn[],
+  user: CurrentUser,
+  deliveryEditable: boolean
+): MatrixRow {
   const itemTasks = getMatrixTasks(project.id, item.id);
   const tasks = [...caseTasks, ...itemTasks];
-  const deliveryEditable = canManageProjects(user);
   const cells: Record<string, MatrixCell> = {
     project_item_name: { value: item.name, status: item.status, aggregateCount: Math.round(item.progress) },
     case_name: { value: '', ownerName: businessOwnerLabel(project.business_owner_name) },
@@ -2244,7 +2273,7 @@ export function getMatrix(projectCaseId: string, user: CurrentUser) {
   ];
 
   const caseTasks = getMatrixTasks(projectCaseId, null);
-  const deliveryEditable = canManageProjects(user);
+  const deliveryEditable = canEditProjectDelivery(user, projectCaseId);
 
   const rows = items.map((item) => {
     const itemTasks = getMatrixTasks(projectCaseId, item.id);

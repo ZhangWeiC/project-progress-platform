@@ -265,7 +265,7 @@ export function CaseMatrixPage() {
     }
   };
   const openDeliveryEditor = (row: MatrixRow) => {
-    if (!canManageProjects || (row.row_type !== 'project' && row.row_type !== 'item')) return;
+    if (!row.cells.delivery_status?.editable || (row.row_type !== 'project' && row.row_type !== 'item')) return;
     const isBulk = row.row_type === 'project';
     const title = String(row.cells.project_item_name?.value ?? row.cells.case_item_name?.value ?? (isBulk ? '项目' : '子项目'));
     setDeliveryEditor({
@@ -339,8 +339,8 @@ export function CaseMatrixPage() {
   };
 
   const tableColumns = useMemo(
-    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjects, canManageProjectBasics, openDeliveryEditor, openEditProject, openBulkProgressEditor),
-    [matrixQuery.data?.columns, canManageProjects, canManageProjectBasics, openBulkProgressEditor]
+    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjectBasics, openDeliveryEditor, openEditProject, openBulkProgressEditor),
+    [matrixQuery.data?.columns, canManageProjectBasics, openBulkProgressEditor]
   );
 
   return (
@@ -774,7 +774,6 @@ function ProjectOrderModal({
 function buildColumns(
   columns: MatrixColumn[],
   openTask: (taskId: string) => void,
-  canManageProjects: boolean,
   canManageProjectBasics: boolean,
   onEditDelivery: (row: MatrixRow) => void,
   onEditProject: (projectCaseId: string) => void,
@@ -829,7 +828,7 @@ function buildColumns(
           render: (_value: unknown, row: MatrixRow) => {
             if (row.row_type === 'month') return <span className="matrix-month-spacer" />;
             return isPlainMatrixColumn(child)
-              ? <DeliveryInfoCell columnKey={child.key} row={row} editable={canManageProjects} onEdit={onEditDelivery} />
+              ? <DeliveryInfoCell columnKey={child.key} row={row} editable={Boolean(row.cells.delivery_status?.editable)} onEdit={onEditDelivery} />
               : <ProgressCell cell={row.cells[child.key]} onOpenTask={openTask} onBulkEdit={(cell) => onBulkProgressEdit(row, child, cell)} />;
           }
         };
