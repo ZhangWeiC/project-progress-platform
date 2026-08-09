@@ -20,6 +20,8 @@ const DELIVERY_STATUS_OPTIONS = [
   { label: '其他', value: '其他' }
 ];
 const DEFAULT_DELIVERY_STATUS_FILTER = ['未发货', '待发货', '发货中'];
+const DELIVERY_STATUS_FILTER_STORAGE_KEY = 'project-progress:case-matrix:delivery-status-filter';
+const DELIVERY_STATUS_VALUES = new Set(DELIVERY_STATUS_OPTIONS.map((option) => option.value));
 const DELIVERY_STATUS_COLORS: Record<string, string> = {
   已发货: 'success',
   未发货: 'default',
@@ -75,7 +77,7 @@ export function CaseMatrixPage() {
   const [deliveryEditor, setDeliveryEditor] = useState<DeliveryEditorTarget | null>(null);
   const [expandedRowKeys, setExpandedRowKeys] = useState<Key[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<string[]>(DEFAULT_DELIVERY_STATUS_FILTER);
+  const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<string[]>(loadDeliveryStatusFilter);
   const [matrixPage, setMatrixPage] = useState(1);
   const [matrixPageSize, setMatrixPageSize] = useState(20);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
@@ -129,6 +131,14 @@ export function CaseMatrixPage() {
     setMatrixPage(1);
     setExpandedRowKeys([]);
   }, [searchKeyword, deliveryStatusFilter]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DELIVERY_STATUS_FILTER_STORAGE_KEY, JSON.stringify(deliveryStatusFilter));
+    } catch {
+      // Browsers may disable storage; filtering should still work for the current session.
+    }
+  }, [deliveryStatusFilter]);
 
   useEffect(() => {
     if (watchedDeliveryStatus !== '已发货' || deliveryEditor?.mode === 'bulk') return;
@@ -1325,6 +1335,20 @@ function encodeOwnerTarget(employeeId?: string | null, departmentId?: string | n
 
 function buildOwnerSelectValue(value: string, label?: string | null): OwnerSelectValue {
   return { value, label: label || value };
+}
+
+function loadDeliveryStatusFilter() {
+  try {
+    const stored = localStorage.getItem(DELIVERY_STATUS_FILTER_STORAGE_KEY);
+    if (stored === null) return [...DEFAULT_DELIVERY_STATUS_FILTER];
+    const parsed: unknown = JSON.parse(stored);
+    if (!Array.isArray(parsed) || !parsed.every((value) => typeof value === 'string' && DELIVERY_STATUS_VALUES.has(value))) {
+      return [...DEFAULT_DELIVERY_STATUS_FILTER];
+    }
+    return Array.from(new Set(parsed));
+  } catch {
+    return [...DEFAULT_DELIVERY_STATUS_FILTER];
+  }
 }
 
 function currentMonth() {
