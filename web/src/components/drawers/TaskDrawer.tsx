@@ -1,22 +1,29 @@
-import { Alert, Descriptions, Drawer, Empty, InputNumber, List, Progress, Space, Table, Tag, Typography, message } from 'antd';
+import { HistoryOutlined } from '@ant-design/icons';
+import { Alert, Button, Descriptions, Drawer, InputNumber, Progress, Space, Table, Typography, message } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { fetchTaskDetails, updateSubtaskProgress } from '../../services/cases';
+import { fetchTaskDetails, fetchTaskProgressLogs, updateSubtaskProgress } from '../../services/cases';
 import type { CaseSubTask } from '../../types';
-import { statusColor, statusLabel } from '../../utils/labels';
+import { ProgressLogTable } from '../progress-logs/ProgressLogTable';
 
 type Props = {
   taskId?: string;
   open: boolean;
   onClose: () => void;
   matrixCaseId?: string;
+  onOpenProjectLogs?: (projectCaseId: string, projectName: string) => void;
 };
 
-export function TaskDrawer({ taskId, open, onClose, matrixCaseId }: Props) {
+export function TaskDrawer({ taskId, open, onClose, matrixCaseId, onOpenProjectLogs }: Props) {
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ['task', taskId],
     queryFn: () => fetchTaskDetails(taskId!),
+    enabled: Boolean(taskId && open)
+  });
+  const progressLogsQuery = useQuery({
+    queryKey: ['progress-logs', 'task', taskId],
+    queryFn: () => fetchTaskProgressLogs(taskId!, { page_size: 10 }),
     enabled: Boolean(taskId && open)
   });
 
@@ -25,6 +32,7 @@ export function TaskDrawer({ taskId, open, onClose, matrixCaseId }: Props) {
     onSuccess: async () => {
       message.success('进度已更新');
       await queryClient.invalidateQueries({ queryKey: ['task', taskId] });
+      await queryClient.invalidateQueries({ queryKey: ['progress-logs'] });
       if (matrixCaseId) await queryClient.invalidateQueries({ queryKey: ['matrix', matrixCaseId] });
       await queryClient.invalidateQueries({ queryKey: ['matrix', 'all'] });
     },
@@ -88,51 +96,21 @@ export function TaskDrawer({ taskId, open, onClose, matrixCaseId }: Props) {
             <Table rowKey="id" size="small" pagination={false} columns={subtaskColumns} dataSource={data.subtasks} />
           </div>
 
-          <div>
-            <Typography.Title level={5}>异常情况</Typography.Title>
-            {data.exceptions.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无异常" />
-            ) : (
-              <List
-                size="small"
-                dataSource={data.exceptions}
-                renderItem={(item) => (
-                  <List.Item>
-                    <Space direction="vertical" size={2}>
-                      <Space>
-                        <Tag color={statusColor(item.status)}>{statusLabel(item.status)}</Tag>
-                        <Typography.Text strong>{item.title}</Typography.Text>
-                      </Space>
-                      <Typography.Text type="secondary">
-                        {item.responsible_department_name} · {item.current_handler_name}
-                      </Typography.Text>
-                    </Space>
-                  </List.Item>
-                )}
-              />
-            )}
-          </div>
-
-          <div>
-            <Typography.Title level={5}>最近日报</Typography.Title>
-            {data.workLogs.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无日报" />
-            ) : (
-              <List
-                size="small"
-                dataSource={data.workLogs}
-                renderItem={(item) => (
-                  <List.Item>
-                    <Space direction="vertical" size={2}>
-                      <Typography.Text>
-                        {item.work_date} · {item.actual_employee_name} · {item.hours} 小时
-                      </Typography.Text>
-                      <Typography.Text type="secondary">{item.work_content}</Typography.Text>
-                    </Space>
-                  </List.Item>
-                )}
-              />
-            )}
+          <div className="task-progress-log-section">
+            <div className="task-progress-log-title">
+              <Typography.Title level={5}>进度变更记录</Typography.Title>
+              {onOpenProjectLogs && (
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<HistoryOutlined />}
+                  onClick={() => onOpenProjectLogs(data.task.project_case_id, data.task.case_name ?? '项目')}
+                >
+                  查看项目全部记录
+                </Button>
+              )}
+            </div>
+            <ProgressLogTable data={progressLogsQuery.data} loading={progressLogsQuery.isLoading} compact />
           </div>
         </Space>
       )}

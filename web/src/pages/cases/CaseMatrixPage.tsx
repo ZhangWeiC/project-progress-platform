@@ -1,10 +1,12 @@
-import { CompressOutlined, DeleteOutlined, ExpandAltOutlined, HolderOutlined, MenuOutlined, MinusOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import { CompressOutlined, DeleteOutlined, ExpandAltOutlined, HistoryOutlined, HolderOutlined, MenuOutlined, MinusOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { Button, Card, Divider, Form, Input, InputNumber, Modal, Pagination, Popconfirm, Select, Space, Table, Tag, Tooltip, TreeSelect, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import type { Key, MouseEvent } from 'react';
 import { TaskDrawer } from '../../components/drawers/TaskDrawer';
+import { ProjectProgressLogDrawer } from '../../components/drawers/ProjectProgressLogDrawer';
+import type { ProjectProgressLogTarget } from '../../components/drawers/ProjectProgressLogDrawer';
 import { ProgressCell } from '../../components/matrix/ProgressCell';
 import { createProjectCase, deleteProjectCase, deleteProjectCaseItem, fetchAllMatrix, fetchLookups, fetchProjectCaseManageProfile, fetchProjectMonthOrder, updateDeliveryInfo, updateProjectBulkSubtaskProgress, updateProjectCase, updateProjectMonthOrder } from '../../services/cases';
 import type { ProjectCasePayload } from '../../services/cases';
@@ -74,6 +76,7 @@ export function CaseMatrixPage() {
   const [form] = Form.useForm<ProjectCaseFormValues>();
   const [deliveryForm] = Form.useForm<DeliveryFormValues>();
   const [openedTaskId, setOpenedTaskId] = useState<string>();
+  const [projectProgressLogTarget, setProjectProgressLogTarget] = useState<ProjectProgressLogTarget | null>(null);
   const [deliveryEditor, setDeliveryEditor] = useState<DeliveryEditorTarget | null>(null);
   const [expandedRowKeys, setExpandedRowKeys] = useState<Key[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
@@ -328,6 +331,9 @@ export function CaseMatrixPage() {
     if (!canManageProjectBasics) return;
     setProjectOrderModalOpen(true);
   };
+  const openProjectProgressLogs = (projectCaseId: string, projectName: string) => {
+    setProjectProgressLogTarget({ id: projectCaseId, name: projectName });
+  };
   const moveProjectOrder = (dragId: string, targetId: string) => {
     if (dragId === targetId) return;
     setOrderedProjects((current) => {
@@ -349,7 +355,7 @@ export function CaseMatrixPage() {
   };
 
   const tableColumns = useMemo(
-    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjectBasics, openDeliveryEditor, openEditProject, openBulkProgressEditor),
+    () => buildColumns(matrixQuery.data?.columns ?? [], setOpenedTaskId, canManageProjectBasics, openDeliveryEditor, openEditProject, openProjectProgressLogs, openBulkProgressEditor),
     [matrixQuery.data?.columns, canManageProjectBasics, openBulkProgressEditor]
   );
 
@@ -466,6 +472,15 @@ export function CaseMatrixPage() {
         taskId={openedTaskId}
         open={Boolean(openedTaskId)}
         onClose={() => setOpenedTaskId(undefined)}
+        onOpenProjectLogs={(projectCaseId, projectName) => {
+          setOpenedTaskId(undefined);
+          openProjectProgressLogs(projectCaseId, projectName);
+        }}
+      />
+      <ProjectProgressLogDrawer
+        target={projectProgressLogTarget}
+        open={Boolean(projectProgressLogTarget)}
+        onClose={() => setProjectProgressLogTarget(null)}
       />
       <ProjectOrderModal
         open={projectOrderModalOpen}
@@ -787,6 +802,7 @@ function buildColumns(
   canManageProjectBasics: boolean,
   onEditDelivery: (row: MatrixRow) => void,
   onEditProject: (projectCaseId: string) => void,
+  onOpenProjectLogs: (projectCaseId: string, projectName: string) => void,
   onBulkProgressEdit: (row: MatrixRow, column: MatrixColumn, cell: MatrixCell) => void
 ): ColumnsType<MatrixRow> {
   const leftColumns = columns
@@ -798,7 +814,7 @@ function buildColumns(
       fixed: 'left' as const,
       width: column.key === 'project_item_name' ? 380 : column.key === 'case_name' ? 250 : 190,
       className: `matrix-fixed-left matrix-column-${column.key}`,
-      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row, { canManageProjectBasics, onEditProject })
+      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row, { canManageProjectBasics, onEditProject, onOpenProjectLogs })
     }));
 
   const rightColumns = columns
@@ -810,7 +826,7 @@ function buildColumns(
       fixed: 'right' as const,
       width: 70,
       className: 'matrix-fixed-right',
-      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row, { canManageProjectBasics, onEditProject })
+      render: (_value: unknown, row: MatrixRow) => renderPinnedCell(column.key, row, { canManageProjectBasics, onEditProject, onOpenProjectLogs })
     }));
 
   const groups = new Map<string, MatrixColumn[]>();
@@ -863,7 +879,11 @@ function matrixColumnWidth(column: MatrixColumn) {
 function renderPinnedCell(
   key: string,
   row: MatrixRow,
-  context: { canManageProjectBasics: boolean; onEditProject: (projectCaseId: string) => void }
+  context: {
+    canManageProjectBasics: boolean;
+    onEditProject: (projectCaseId: string) => void;
+    onOpenProjectLogs: (projectCaseId: string, projectName: string) => void;
+  }
 ) {
   const cell = row.cells[key];
   const value = cell?.value;
@@ -893,6 +913,9 @@ function renderPinnedCell(
           ) : (
             <EllipsisText text={text} strong={row.row_type === 'project'} />
           )}
+          {row.row_type === 'project' && (
+            <ProjectLogButton onClick={() => context.onOpenProjectLogs(row.project_case_id, text)} />
+          )}
         </div>
         {secondary && <EllipsisText text={secondary} type="secondary" />}
       </Space>
@@ -910,6 +933,9 @@ function renderPinnedCell(
             <ProjectTitleButton text={text} onClick={() => context.onEditProject(row.project_case_id)} />
           ) : (
             <EllipsisText text={text} strong={row.row_type === 'project'} />
+          )}
+          {row.row_type === 'project' && (
+            <ProjectLogButton onClick={() => context.onOpenProjectLogs(row.project_case_id, text)} />
           )}
         </div>
         {row.row_type === 'project' && cell?.ownerName && (
@@ -990,6 +1016,24 @@ function ProjectTitleButton({ text, onClick }: { text: string; onClick: () => vo
   );
   if (!text || text === '-') return content;
   return <Tooltip title={`${text}（点击编辑）`}>{content}</Tooltip>;
+}
+
+function ProjectLogButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Tooltip title="查看进度变更记录">
+      <Button
+        type="text"
+        size="small"
+        className="matrix-project-log-button"
+        icon={<HistoryOutlined />}
+        aria-label="查看进度变更记录"
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick();
+        }}
+      />
+    </Tooltip>
+  );
 }
 
 type EllipsisTextProps = {

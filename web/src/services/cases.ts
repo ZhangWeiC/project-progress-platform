@@ -1,5 +1,5 @@
 import { apiDelete, apiGet, apiPatch, apiPost } from './api';
-import type { ExceptionRecord, LookupResponse, MatrixResponse, ProjectCase, ProjectMonthOrderResponse, TaskDetails, WorkflowTemplate, WorkbenchResponse, WorkbenchTask, WorkLogEntry, WorkLogPlanItem } from '../types';
+import type { ExceptionRecord, LookupResponse, MatrixResponse, ProgressLogResponse, ProjectCase, ProjectMonthOrderResponse, TaskDetails, WorkflowTemplate, WorkbenchResponse, WorkbenchTask, WorkLogEntry, WorkLogPlanItem } from '../types';
 
 export const fetchCases = () => apiGet<ProjectCase[]>('/api/cases');
 
@@ -72,6 +72,31 @@ export const fetchAllMatrix = (params: MatrixQueryParams = {}) => {
 export const fetchCaseMatrix = (caseId: string) => apiGet<MatrixResponse>(`/api/cases/${caseId}/matrix`);
 
 export const fetchTaskDetails = (taskId: string) => apiGet<TaskDetails>(`/api/tasks/${taskId}`);
+
+export type ProgressLogQueryParams = {
+  page?: number;
+  page_size?: number;
+  case_item_id?: string;
+  task_type?: string;
+  changed_by?: string;
+  start_at?: string;
+  end_at?: string;
+};
+
+function progressLogQuery(params: ProgressLogQueryParams) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') search.set(key, String(value));
+  }
+  const query = search.toString();
+  return query ? `?${query}` : '';
+}
+
+export const fetchProjectProgressLogs = (caseId: string, params: ProgressLogQueryParams = {}) =>
+  apiGet<ProgressLogResponse>(`/api/cases/${caseId}/progress-logs${progressLogQuery(params)}`);
+
+export const fetchTaskProgressLogs = (taskId: string, params: ProgressLogQueryParams = {}) =>
+  apiGet<ProgressLogResponse>(`/api/tasks/${taskId}/progress-logs${progressLogQuery(params)}`);
 
 export const updateSubtaskProgress = (subtaskId: string, progress: number) =>
   apiPatch<TaskDetails>(`/api/subtasks/${subtaskId}/progress`, { progress });

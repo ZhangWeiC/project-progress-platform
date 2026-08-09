@@ -20,7 +20,9 @@ import {
   getProductionPlanItemDetails,
   getProjectCaseManageProfile,
   getProjectMonthOrder,
+  getProjectProgressLogs,
   getTaskDetails,
+  getTaskProgressLogs,
   getWorkSummaryReport,
   getWorkLogPlanItems,
   reconcileShippedItemsWithStageRequirements,
@@ -253,6 +255,22 @@ app.get('/api/cases/:id/manage-profile', async (request) => {
   return getProjectCaseManageProfile(id, user);
 });
 
+const progressLogQuery = z.object({
+  page: z.coerce.number().int().min(1).optional(),
+  page_size: z.coerce.number().int().min(1).max(100).optional(),
+  case_item_id: z.string().trim().optional(),
+  task_type: z.string().trim().optional(),
+  changed_by: z.string().trim().optional(),
+  start_at: z.string().trim().optional(),
+  end_at: z.string().trim().optional()
+});
+
+app.get('/api/cases/:id/progress-logs', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  return getProjectProgressLogs(id, user, progressLogQuery.parse(request.query));
+});
+
 app.get('/api/cases/:id', async (request) => {
   const user = getCurrentUser(request.headers);
   const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -358,6 +376,12 @@ app.get('/api/tasks/:id', async (request) => {
   }
   assertCanReadCase(user, task.project_case_id);
   return getTaskDetails(id, user);
+});
+
+app.get('/api/tasks/:id/progress-logs', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  return getTaskProgressLogs(id, user, progressLogQuery.parse(request.query));
 });
 
 const progressBody = z.object({

@@ -1695,38 +1695,220 @@ export function getTaskDetails(taskId: string, user?: CurrentUser) {
   const subtasksWithPermission = user
     ? subtasks.map((subtask) => ({ ...subtask, editable: canEditSubtask(user, subtask.id) }))
     : subtasks;
-  const workLogs = db
+  return { task, subtasks: subtasksWithPermission };
+}
+
+export type ProgressLogQuery = {
+  page?: number;
+  page_size?: number;
+  case_item_id?: string;
+  task_type?: string;
+  changed_by?: string;
+  start_at?: string;
+  end_at?: string;
+};
+
+type ProgressLogOperationRow = {
+  id: string;
+  project_case_id: string;
+  project_name: string;
+  item_name: string | null;
+  task_name: string | null;
+  subtask_name: string | null;
+  changed_by: string;
+  changed_by_name: string;
+  source: string;
+  reason: string | null;
+  created_at: string;
+  affected_count: number;
+  affected_item_count: number;
+  min_before_progress: number | null;
+  max_before_progress: number | null;
+  min_after_progress: number | null;
+  max_after_progress: number | null;
+};
+
+type ProgressLogDetailRow = {
+  operation_id: string;
+  id: string;
+  target_type: TargetType;
+  target_id: string;
+  project_case_id: string;
+  project_name: string;
+  case_item_id: string | null;
+  item_name: string | null;
+  task_id: string;
+  task_type: string;
+  task_name: string;
+  subtask_name: string | null;
+  changed_by: string;
+  changed_by_name: string;
+  before_status: string | null;
+  after_status: string | null;
+  before_progress: number | null;
+  after_progress: number | null;
+  source: string;
+  reason: string | null;
+  remark: string | null;
+  created_at: string;
+};
+
+const PROGRESS_LOG_CONTEXT_CTE = `
+  WITH contextual_logs AS (
+    SELECT pl.*,
+           CASE
+             WHEN pl.source IN ('project_bulk_edit', 'delivery_required_stage_complete')
+               THEN pl.source || '|' || pl.changed_by || '|' || pl.created_at || '|' || COALESCE(pl.reason, '')
+             ELSE pl.id
+           END as operation_id,
+           t.project_case_id,
+           pc.name as project_name,
+           t.case_item_id,
+           ci.name as item_name,
+           t.id as task_id,
+           t.task_type,
+           t.name as task_name,
+           CASE WHEN pl.target_type = 'subtask' THEN s.name ELSE NULL END as subtask_name,
+           COALESCE(NULLIF(emp.name, ''), pl.changed_by) as changed_by_name
+    FROM progress_log pl
+    LEFT JOIN case_subtask s ON pl.target_type = 'subtask' AND s.id = pl.target_id
+    JOIN case_task t ON (pl.target_type = 'task' AND t.id = pl.target_id)
+                    OR (pl.target_type = 'subtask' AND t.id = s.case_task_id)
+    JOIN project_case pc ON pc.id = t.project_case_id
+    LEFT JOIN case_item ci ON ci.id = t.case_item_id
+    LEFT JOIN employee emp ON emp.id = pl.changed_by
+    WHERE t.project_case_id = @projectCaseId
+      AND (@taskId IS NULL OR t.id = @taskId)
+  )`;
+
+export function getProjectProgressLogs(projectCaseId: string, user: CurrentUser, query: ProgressLogQuery = {}) {
+  assertCanReadCase(user, projectCaseId);
+  const project = db.prepare('SELECT id FROM project_case WHERE id = ?').get(projectCaseId);
+  if (!project) {
+    const err = new Error('项目不存在');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+  return getProgressLogs(projectCaseId, null, query);
+}
+
+export function getTaskProgressLogs(taskId: string, user: CurrentUser, query: ProgressLogQuery = {}) {
+  const task = db.prepare('SELECT project_case_id FROM case_task WHERE id = ?').get(taskId) as { project_case_id: string } | undefined;
+  if (!task) {
+    const err = new Error('任务不存在');
+    err.name = 'NOT_FOUND';
+    throw err;
+  }
+  assertCanReadCase(user, task.project_case_id);
+  return getProgressLogs(task.project_case_id, taskId, query);
+}
+
+function getProgressLogs(projectCaseId: string, taskId: string | null, query: ProgressLogQuery) {
+  const page = Math.max(1, query.page ?? 1);
+  const pageSize = Math.min(Math.max(query.page_size ?? (taskId ? 10 : 30), 1), 100);
+  const params: Record<string, string | number | null> = { projectCaseId, taskId };
+  const conditions: string[] = [];
+  if (query.case_item_id) {
+    conditions.push('case_item_id = @caseItemId');
+    params.caseItemId = query.case_item_id;
+  }
+  if (query.task_type) {
+    conditions.push('task_type = @taskType');
+    params.taskType = query.task_type;
+  }
+  if (query.changed_by) {
+    conditions.push('changed_by = @changedBy');
+    params.changedBy = query.changed_by;
+  }
+  if (query.start_at) {
+    conditions.push('created_at >= @startAt');
+    params.startAt = query.start_at;
+  }
+  if (query.end_at) {
+    conditions.push('created_at <= @endAt');
+    params.endAt = query.end_at;
+  }
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const filteredCte = `${PROGRESS_LOG_CONTEXT_CTE}, filtered_logs AS (SELECT * FROM contextual_logs ${whereClause})`;
+  const totalRow = db
+    .prepare(`${filteredCte} SELECT COUNT(*) as count FROM (SELECT operation_id FROM filtered_logs GROUP BY operation_id)`)
+    .get(params) as { count: number };
+  const operations = db
     .prepare(
-      `SELECT wl.*, emp.name as actual_employee_name, input.name as input_by_name
-       FROM work_log_entry wl
-       LEFT JOIN employee emp ON emp.id = wl.actual_employee_id
-       LEFT JOIN employee input ON input.id = wl.input_by
-       WHERE wl.case_task_id = ?
-       ORDER BY wl.work_date DESC`
+      `${filteredCte}
+       SELECT operation_id as id,
+              MAX(project_case_id) as project_case_id,
+              MAX(project_name) as project_name,
+              CASE WHEN COUNT(DISTINCT case_item_id) = 1 THEN MAX(item_name) ELSE NULL END as item_name,
+              CASE WHEN COUNT(DISTINCT task_id) = 1 THEN MAX(task_name) ELSE NULL END as task_name,
+              CASE WHEN COUNT(DISTINCT COALESCE(subtask_name, '')) = 1 THEN MAX(subtask_name) ELSE NULL END as subtask_name,
+              MAX(changed_by) as changed_by,
+              MAX(changed_by_name) as changed_by_name,
+              MAX(source) as source,
+              MAX(reason) as reason,
+              MAX(created_at) as created_at,
+              COUNT(*) as affected_count,
+              COUNT(DISTINCT case_item_id) as affected_item_count,
+              MIN(before_progress) as min_before_progress,
+              MAX(before_progress) as max_before_progress,
+              MIN(after_progress) as min_after_progress,
+              MAX(after_progress) as max_after_progress
+       FROM filtered_logs
+       GROUP BY operation_id
+       ORDER BY created_at DESC, id DESC
+       LIMIT @limit OFFSET @offset`
     )
-    .all(taskId);
-  const exceptions = db
-    .prepare(
-      `SELECT ex.*, handler.name as current_handler_name, dept.name as responsible_department_name
-       FROM exception_record ex
-       LEFT JOIN employee handler ON handler.id = ex.current_handler_id
-       LEFT JOIN department dept ON dept.id = ex.responsible_department_id
-       WHERE ex.case_task_id = ?
-       ORDER BY ex.updated_at DESC`
-    )
-    .all(taskId);
-  const progressLogs = db
-    .prepare(
-      `SELECT pl.*, emp.name as changed_by_name
-       FROM progress_log pl
-       LEFT JOIN employee emp ON emp.id = pl.changed_by
-       WHERE (pl.target_type = 'task' AND pl.target_id = ?)
-          OR (pl.target_type = 'subtask' AND pl.target_id IN (SELECT id FROM case_subtask WHERE case_task_id = ?))
-       ORDER BY pl.created_at DESC
-       LIMIT 20`
-    )
-    .all(taskId, taskId);
-  return { task, subtasks: subtasksWithPermission, workLogs, exceptions, progressLogs };
+    .all({ ...params, limit: pageSize, offset: (page - 1) * pageSize }) as ProgressLogOperationRow[];
+
+  const detailsByOperation = new Map<string, ProgressLogDetailRow[]>();
+  if (operations.length > 0) {
+    const operationParams: Record<string, string> = {};
+    const placeholders = operations.map((operation, index) => {
+      operationParams[`operation${index}`] = operation.id;
+      return `@operation${index}`;
+    });
+    const details = db
+      .prepare(
+        `${filteredCte}
+         SELECT operation_id, id, target_type, target_id, project_case_id, project_name,
+                case_item_id, item_name, task_id, task_type, task_name, subtask_name,
+                changed_by, changed_by_name, before_status, after_status,
+                before_progress, after_progress, source, reason, remark, created_at
+         FROM filtered_logs
+         WHERE operation_id IN (${placeholders.join(', ')})
+         ORDER BY created_at DESC, item_name, task_name, subtask_name, id`
+      )
+      .all({ ...params, ...operationParams }) as ProgressLogDetailRow[];
+    for (const detail of details) {
+      const current = detailsByOperation.get(detail.operation_id) ?? [];
+      current.push(detail);
+      detailsByOperation.set(detail.operation_id, current);
+    }
+  }
+
+  const facetParams = { projectCaseId, taskId };
+  const facets = {
+    case_items: db
+      .prepare(`${PROGRESS_LOG_CONTEXT_CTE} SELECT DISTINCT case_item_id as value, item_name as label FROM contextual_logs WHERE case_item_id IS NOT NULL ORDER BY item_name`)
+      .all(facetParams),
+    stages: db
+      .prepare(`${PROGRESS_LOG_CONTEXT_CTE} SELECT task_type as value, MAX(task_name) as label FROM contextual_logs GROUP BY task_type ORDER BY MIN(created_at)`)
+      .all(facetParams),
+    operators: db
+      .prepare(`${PROGRESS_LOG_CONTEXT_CTE} SELECT changed_by as value, MAX(changed_by_name) as label FROM contextual_logs GROUP BY changed_by ORDER BY label`)
+      .all(facetParams)
+  };
+
+  return {
+    items: operations.map((operation) => ({
+      ...operation,
+      affected_count: Number(operation.affected_count),
+      affected_item_count: Number(operation.affected_item_count),
+      details: detailsByOperation.get(operation.id) ?? []
+    })),
+    pagination: { page, page_size: pageSize, total: Number(totalRow.count) },
+    facets
+  };
 }
 
 type MatrixProject = {

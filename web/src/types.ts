@@ -229,15 +229,65 @@ export type ExceptionRecord = {
 export type TaskDetails = {
   task: CaseTask;
   subtasks: CaseSubTask[];
-  workLogs: WorkLogEntry[];
-  exceptions: ExceptionRecord[];
-  progressLogs: Array<{
-    id: string;
-    before_progress: number;
-    after_progress: number;
-    changed_by_name?: string;
-    created_at: string;
-  }>;
+};
+
+export type ProgressLogDetail = {
+  id: string;
+  target_type: 'task' | 'subtask';
+  target_id: string;
+  project_case_id: string;
+  project_name: string;
+  case_item_id?: string | null;
+  item_name?: string | null;
+  task_id: string;
+  task_type: string;
+  task_name: string;
+  subtask_name?: string | null;
+  changed_by: string;
+  changed_by_name: string;
+  before_status?: string | null;
+  after_status?: string | null;
+  before_progress?: number | null;
+  after_progress?: number | null;
+  source: string;
+  reason?: string | null;
+  remark?: string | null;
+  created_at: string;
+};
+
+export type ProgressLogOperation = {
+  id: string;
+  project_case_id: string;
+  project_name: string;
+  item_name?: string | null;
+  task_name?: string | null;
+  subtask_name?: string | null;
+  changed_by: string;
+  changed_by_name: string;
+  source: string;
+  reason?: string | null;
+  created_at: string;
+  affected_count: number;
+  affected_item_count: number;
+  min_before_progress?: number | null;
+  max_before_progress?: number | null;
+  min_after_progress?: number | null;
+  max_after_progress?: number | null;
+  details: ProgressLogDetail[];
+};
+
+export type ProgressLogResponse = {
+  items: ProgressLogOperation[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total: number;
+  };
+  facets: {
+    case_items: Array<{ value: string; label: string }>;
+    stages: Array<{ value: string; label: string }>;
+    operators: Array<{ value: string; label: string }>;
+  };
 };
 
 export type LookupResponse = {
