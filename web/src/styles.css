@@ -113,6 +113,201 @@ body {
   gap: 12px;
 }
 
+.design-timeline-card {
+  overflow: hidden;
+}
+
+.design-work-summary-card {
+  border-radius: 6px;
+}
+
+.design-work-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.design-work-summary .ant-statistic:not(:last-child) {
+  border-right: 1px solid #edf0f5;
+}
+
+.design-timeline-loading {
+  min-height: 240px;
+  display: grid;
+  place-items: center;
+}
+
+.design-timeline {
+  width: 100%;
+  overflow-x: auto;
+  background: #fff;
+}
+
+.design-timeline-content {
+  width: 100%;
+}
+
+.design-timeline-header,
+.design-timeline-row {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+}
+
+.design-timeline-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  border-bottom: 1px solid #dfe3e8;
+  background: #fafbfc;
+}
+
+.design-timeline-person-head,
+.design-timeline-person {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  border-right: 1px solid #dfe3e8;
+  background: #fff;
+}
+
+.design-timeline-person-head {
+  z-index: 6;
+  padding: 12px 14px;
+  background: #fafbfc;
+  font-weight: 600;
+}
+
+.design-timeline-days,
+.design-timeline-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--timeline-days), minmax(0, 1fr));
+}
+
+.design-timeline-day {
+  min-width: 0;
+  padding: 7px 2px 6px;
+  border-right: 1px solid #edf0f5;
+  text-align: center;
+  color: #334155;
+}
+
+.design-timeline-day small {
+  display: block;
+  margin-top: 2px;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.design-timeline-day.is-sunday,
+.design-timeline-grid > .is-sunday {
+  background: #fff8f0;
+}
+
+.design-timeline-day.is-today {
+  box-shadow: inset 0 -2px #1677ff;
+  color: #1677ff;
+  font-weight: 600;
+}
+
+.design-timeline-row {
+  border-bottom: 1px solid #edf0f5;
+}
+
+.design-timeline-row:last-child {
+  border-bottom: 0;
+}
+
+.design-timeline-person {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 8px 8px 8px 14px;
+}
+
+.design-timeline-person .ant-btn {
+  padding-inline: 4px;
+}
+
+.design-timeline-person-summary {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.design-timeline-person-summary .ant-typography {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.design-timeline-person-summary .ant-typography-secondary {
+  font-size: 12px;
+}
+
+.design-timeline-track {
+  position: relative;
+  min-width: 0;
+}
+
+.design-timeline-grid {
+  position: absolute;
+  inset: 0;
+}
+
+.design-timeline-grid > div {
+  border-right: 1px solid #f0f2f5;
+}
+
+.design-timeline-bar {
+  position: absolute;
+  z-index: 2;
+  height: 29px;
+  min-width: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: #dbeafe;
+  color: #1e3a5f;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  text-align: left;
+}
+
+.design-timeline-bar:hover {
+  background: #bfdbfe;
+}
+
+.design-timeline-bar span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.design-timeline-bar strong {
+  flex: 0 0 auto;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.design-work-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+}
+
+.design-work-modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+
 .matrix-card {
   border-radius: 6px;
 }
@@ -1342,6 +1537,15 @@ body {
     padding: 12px;
   }
 
+  .design-work-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .design-work-summary .ant-statistic:nth-child(2) {
+    border-right: 0;
+  }
+
   .page-title-row .ant-space {
     width: 100%;
   }
@@ -1396,5 +1600,9 @@ body {
 
   .mobile-progress-editor {
     grid-template-columns: 84px minmax(0, 1fr);
+  }
+
+  .design-work-form-grid {
+    grid-template-columns: 1fr;
   }
 }

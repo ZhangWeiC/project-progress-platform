@@ -1,11 +1,12 @@
-import { DeleteOutlined, EditOutlined, MinusCircleOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Descriptions, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { DeleteOutlined, EditOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { fetchWorkflowTemplate, updateWorkflowStageRequirement } from '../../services/cases';
 import { apiDelete, apiGet, apiPatch, apiPost } from '../../services/api';
 import type { WorkflowStage } from '../../types';
+import { createDesignWorkType, fetchDesignWorkTypes, updateDesignWorkType, type DesignWorkType } from '../../services/designWork';
 
 export function SettingsPage() {
   const { section = 'templates' } = useParams();
@@ -140,6 +141,7 @@ export function SettingsPage() {
                 />
               )
             },
+            { key: 'design-work-types', label: '工作类型', children: <DesignWorkTypePanel /> },
             { key: 'permissions', label: '权限配置', children: <PermissionTable /> }
           ]}
         />
@@ -152,7 +154,7 @@ export function SettingsPage() {
         confirmLoading={feishuEmployeeUpdateMutation.isPending}
         onCancel={closeEmployeeEditor}
         onOk={() => employeeForm.submit()}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<FeishuEmployeeFormValues> form={employeeForm} layout="vertical" onFinish={submitEmployeeForm}>
           <Form.Item label="姓名" name="name" rules={[{ required: true, message: '请输入姓名' }]}>
@@ -164,6 +166,94 @@ export function SettingsPage() {
         </Form>
       </Modal>
     </>
+  );
+}
+
+type WorkTypeFormValues = { name: string; sort_order: number; enabled: boolean };
+
+function DesignWorkTypePanel() {
+  const queryClient = useQueryClient();
+  const [form] = Form.useForm<WorkTypeFormValues>();
+  const [editing, setEditing] = useState<DesignWorkType | null | undefined>(undefined);
+  const query = useQuery({ queryKey: ['design-work-types'], queryFn: fetchDesignWorkTypes });
+  const saveMutation = useMutation({
+    mutationFn: (values: WorkTypeFormValues) => editing
+      ? updateDesignWorkType(editing.id, values)
+      : createDesignWorkType(values),
+    onSuccess: () => {
+      message.success(editing ? '工作类型已更新' : '工作类型已添加');
+      setEditing(undefined);
+      form.resetFields();
+      queryClient.invalidateQueries({ queryKey: ['design-work-types'] });
+      queryClient.invalidateQueries({ queryKey: ['design-work-lookups'] });
+    },
+    onError: (error) => message.error(error.message)
+  });
+  const toggleMutation = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => updateDesignWorkType(id, { enabled }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['design-work-types'] });
+      queryClient.invalidateQueries({ queryKey: ['design-work-lookups'] });
+    },
+    onError: (error) => message.error(error.message)
+  });
+
+  function openEditor(row?: DesignWorkType) {
+    setEditing(row ?? null);
+    form.setFieldsValue(row
+      ? { name: row.name, sort_order: row.sort_order, enabled: Boolean(row.enabled) }
+      : { name: '', sort_order: (query.data?.length ?? 0) * 10 + 10, enabled: true });
+  }
+
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <div className="page-title-row">
+        <Typography.Text type="secondary">维护设计工作录入时可选的工作类型；停用后不影响历史记录。</Typography.Text>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>新增工作类型</Button>
+      </div>
+      {query.error ? <Alert type="error" message={query.error.message} /> : null}
+      <Table<DesignWorkType>
+        rowKey="id"
+        size="small"
+        loading={query.isLoading}
+        pagination={false}
+        dataSource={query.data ?? []}
+        columns={[
+          { title: '顺序', dataIndex: 'sort_order', width: 90 },
+          { title: '工作类型', dataIndex: 'name', render: (value) => <Typography.Text strong>{value}</Typography.Text> },
+          {
+            title: '启用', dataIndex: 'enabled', width: 90,
+            render: (value, row) => <Switch size="small" checked={Boolean(value)} loading={toggleMutation.variables?.id === row.id && toggleMutation.isPending} onChange={(enabled) => toggleMutation.mutate({ id: row.id, enabled })} />
+          },
+          {
+            title: '操作', key: 'action', width: 90, align: 'right',
+            render: (_value, row) => <Button type="link" icon={<EditOutlined />} onClick={() => openEditor(row)}>编辑</Button>
+          }
+        ]}
+      />
+      <Modal
+        title={editing ? '编辑工作类型' : '新增工作类型'}
+        open={editing !== undefined}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={saveMutation.isPending}
+        onCancel={() => { setEditing(undefined); form.resetFields(); }}
+        onOk={() => form.submit()}
+        destroyOnClose
+      >
+        <Form<WorkTypeFormValues> form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)}>
+          <Form.Item label="名称" name="name" rules={[{ required: true, whitespace: true, message: '请输入工作类型名称' }]}>
+            <Input placeholder="例如：效果图制作" />
+          </Form.Item>
+          <Form.Item label="显示顺序" name="sort_order" rules={[{ required: true, message: '请输入显示顺序' }]}>
+            <InputNumber precision={0} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item label="启用" name="enabled" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </Space>
   );
 }
 

@@ -1,4 +1,4 @@
-import { AppstoreOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, CalendarOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons';
 import { Avatar, Button, Layout, Menu, Space, Typography } from 'antd';
 import { useQueryClient } from '@tanstack/react-query';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -9,6 +9,7 @@ const { Header, Sider, Content } = Layout;
 
 const menuItems = [
   { key: '/cases', icon: <AppstoreOutlined />, label: '进度总表' },
+  { key: '/design-work', icon: <CalendarOutlined />, label: '设计工作记录' },
   { key: '/settings/templates', icon: <SettingOutlined />, label: '后台配置' }
 ];
 
@@ -24,12 +25,6 @@ export function AppShell() {
     [canManageSettings]
   );
   const selectedKey = menuItems.find((item) => location.pathname.startsWith(item.key))?.key ?? '/cases';
-
-  useEffect(() => {
-    if (window.matchMedia('(max-width: 768px)').matches) {
-      navigate('/m/cases', { replace: true });
-    }
-  }, [location.pathname, navigate]);
 
   useEffect(() => {
     if (!canManageSettings && location.pathname.startsWith('/settings')) {

@@ -300,6 +300,47 @@ export function initializeDatabase() {
       FOREIGN KEY (team_id) REFERENCES team(id)
     );
 
+    CREATE TABLE IF NOT EXISTS design_work_type (
+      id TEXT PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL UNIQUE,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS design_work_record (
+      id TEXT PRIMARY KEY,
+      employee_id TEXT NOT NULL,
+      input_by TEXT NOT NULL,
+      project_case_id TEXT,
+      work_type_id TEXT,
+      association_scope TEXT NOT NULL DEFAULT 'none',
+      start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL,
+      work_days REAL,
+      work_content TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'manual',
+      source_sheet TEXT,
+      source_reference TEXT,
+      record_status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (employee_id) REFERENCES employee(id),
+      FOREIGN KEY (input_by) REFERENCES employee(id),
+      FOREIGN KEY (project_case_id) REFERENCES project_case(id),
+      FOREIGN KEY (work_type_id) REFERENCES design_work_type(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS design_work_record_target (
+      record_id TEXT NOT NULL,
+      case_item_id TEXT NOT NULL,
+      PRIMARY KEY (record_id, case_item_id),
+      FOREIGN KEY (record_id) REFERENCES design_work_record(id) ON DELETE CASCADE,
+      FOREIGN KEY (case_item_id) REFERENCES case_item(id)
+    );
+
     CREATE TABLE IF NOT EXISTS exception_record (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -395,6 +436,8 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_task_item ON case_task(case_item_id);
     CREATE INDEX IF NOT EXISTS idx_subtask_task ON case_subtask(case_task_id);
     CREATE INDEX IF NOT EXISTS idx_work_log_task ON work_log_entry(case_task_id);
+    CREATE INDEX IF NOT EXISTS idx_design_work_record_employee_dates ON design_work_record(employee_id, start_date, end_date);
+    CREATE INDEX IF NOT EXISTS idx_design_work_record_project ON design_work_record(project_case_id);
     CREATE INDEX IF NOT EXISTS idx_exception_task ON exception_record(case_task_id);
     CREATE INDEX IF NOT EXISTS idx_auth_session_employee ON auth_session(employee_id);
     CREATE INDEX IF NOT EXISTS idx_employee_department_department ON employee_department(department_id);
@@ -417,6 +460,26 @@ export function initializeDatabase() {
   normalizeLegacyFeishuReferences();
   seedProductionPlans();
   migrateWorkLogProductionPlanLink();
+  seedDesignWorkTypes();
+}
+
+function seedDesignWorkTypes() {
+  const createdAt = nowIso();
+  const rows = [
+    ['DWT-SCHEME', 'scheme_design', '方案设计', 10],
+    ['DWT-DETAIL', 'detail_cutting', '详图开料', 20],
+    ['DWT-MODEL', '3d_modeling', '三维建模', 30],
+    ['DWT-REVISION', 'scheme_revision', '方案修改', 40],
+    ['DWT-LEAVE', 'leave', '休假', 50]
+  ] as const;
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO design_work_type
+     (id, code, name, sort_order, enabled, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 1, ?, ?)`
+  );
+  for (const [id, code, name, sortOrder] of rows) {
+    insert.run(id, code, name, sortOrder, createdAt, createdAt);
+  }
 }
 
 function migratePermissionModel() {

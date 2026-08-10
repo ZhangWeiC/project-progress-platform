@@ -1,25 +1,15 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { AppShell } from '../components/common/AppShell';
 import { CaseMatrixPage } from '../pages/cases/CaseMatrixPage';
-import { WorkLogsPage } from '../pages/work-logs/WorkLogsPage';
-import { ProductionPlansPage } from '../pages/production-plans/ProductionPlansPage';
-import { ExceptionsPage } from '../pages/exceptions/ExceptionsPage';
-import { ReportsPage } from '../pages/reports/ReportsPage';
 import { SettingsPage } from '../pages/settings/SettingsPage';
-import { MobileShell } from '../pages/mobile/MobileShell';
-import { MobileTaskListPage } from '../pages/mobile/MobileTaskListPage';
-import { MobileWorkLogPage } from '../pages/mobile/MobileWorkLogPage';
-import { MobileExceptionsPage } from '../pages/mobile/MobileExceptionsPage';
-import { MobileCaseSummaryPage } from '../pages/mobile/MobileCaseSummaryPage';
-import { MobileCasesPage } from '../pages/mobile/MobileCasesPage';
+import { DesignWorkTimelinePage } from '../pages/design-work/DesignWorkTimelinePage';
 import { LoginPage } from '../pages/login/LoginPage';
 import { FeishuCallbackPage } from '../pages/auth/FeishuCallbackPage';
 import { RequireAuth } from '../components/auth/RequireAuth';
 import { getAuthSession } from '../services/auth';
 
 function HomeRedirect() {
-  const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
-  return <Navigate to={isMobile ? '/m/cases' : '/cases'} replace />;
+  return <Navigate to="/cases" replace />;
 }
 
 function AdminOnly({ children }: { children: JSX.Element }) {
@@ -38,24 +28,8 @@ export const router = createBrowserRouter([
       { index: true, element: <HomeRedirect /> },
       { path: 'dashboard', element: <Navigate to="/cases" replace /> },
       { path: 'cases', element: <CaseMatrixPage /> },
-      { path: 'production-plans', element: <ProductionPlansPage /> },
-      { path: 'work-logs', element: <WorkLogsPage /> },
-      { path: 'exceptions', element: <ExceptionsPage /> },
-      { path: 'imports', element: <Navigate to="/cases" replace /> },
-      { path: 'reports', element: <ReportsPage /> },
+      { path: 'design-work', element: <DesignWorkTimelinePage /> },
       { path: 'settings/:section?', element: <AdminOnly><SettingsPage /></AdminOnly> }
-    ]
-  },
-  {
-    path: '/m',
-    element: <RequireAuth><MobileShell /></RequireAuth>,
-    children: [
-      { index: true, element: <Navigate to="/m/cases" replace /> },
-      { path: 'cases', element: <MobileCasesPage /> },
-      { path: 'tasks', element: <MobileTaskListPage /> },
-      { path: 'work-logs/new', element: <MobileWorkLogPage /> },
-      { path: 'exceptions', element: <MobileExceptionsPage /> },
-      { path: 'cases/:id', element: <MobileCaseSummaryPage /> }
     ]
   }
 ]);

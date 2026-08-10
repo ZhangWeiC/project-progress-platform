@@ -36,6 +36,16 @@ import {
 } from './services.js';
 import { login, logout } from './auth.js';
 import {
+  createDesignWorkRecord,
+  createDesignWorkType,
+  deleteDesignWorkRecord,
+  getDesignLookups,
+  getDesignTimeline,
+  listDesignWorkTypes,
+  updateDesignWorkRecord,
+  updateDesignWorkType
+} from './design.js';
+import {
   buildFeishuAuthorizeUrl,
   deactivateFeishuContactEmployee,
   getFeishuContactsByDepartment,
@@ -303,6 +313,76 @@ app.get('/api/cases/:id/matrix', async (request) => {
   const user = getCurrentUser(request.headers);
   const { id } = z.object({ id: z.string() }).parse(request.params);
   return getMatrix(id, user);
+});
+
+const designWorkRecordBody = z.object({
+  employee_id: z.string().trim().optional(),
+  project_case_id: z.string().trim().nullable().optional(),
+  work_type_id: z.string().trim().nullable().optional(),
+  association_scope: z.enum(['none', 'project', 'items']).optional(),
+  case_item_ids: z.array(z.string().trim().min(1)).optional(),
+  start_date: z.string().trim().min(1),
+  end_date: z.string().trim().min(1),
+  work_days: z.number().positive().nullable().optional(),
+  work_content: z.string().trim().optional(),
+  sync_progress: z.boolean().optional(),
+  progress: z.number().min(0).max(100).optional()
+});
+
+app.get('/api/design-work/lookups', async (request) => {
+  return getDesignLookups(getCurrentUser(request.headers));
+});
+
+app.get('/api/design-work/timeline', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const query = z.object({
+    start_date: z.string().trim().min(1),
+    end_date: z.string().trim().min(1),
+    employee_id: z.string().trim().optional()
+  }).parse(request.query);
+  return getDesignTimeline(user, query.start_date, query.end_date, query.employee_id);
+});
+
+app.post('/api/design-work/records', async (request) => {
+  return createDesignWorkRecord(getCurrentUser(request.headers), designWorkRecordBody.parse(request.body));
+});
+
+app.patch('/api/design-work/records/:id', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id } = z.object({ id: z.string().trim().min(1) }).parse(request.params);
+  return updateDesignWorkRecord(user, id, designWorkRecordBody.parse(request.body));
+});
+
+app.delete('/api/design-work/records/:id', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id } = z.object({ id: z.string().trim().min(1) }).parse(request.params);
+  return deleteDesignWorkRecord(user, id);
+});
+
+const workTypeBody = z.object({
+  name: z.string().trim().min(1),
+  sort_order: z.number().int().optional(),
+  enabled: z.boolean().optional()
+});
+
+app.get('/api/admin/design-work-types', async (request) => {
+  const user = getCurrentUser(request.headers);
+  if (!canManageProjects(user)) {
+    const error = new Error('只有管理员可以查看工作类型配置');
+    error.name = 'PERMISSION_DENIED';
+    throw error;
+  }
+  return listDesignWorkTypes(true);
+});
+
+app.post('/api/admin/design-work-types', async (request) => {
+  return createDesignWorkType(getCurrentUser(request.headers), workTypeBody.parse(request.body));
+});
+
+app.patch('/api/admin/design-work-types/:id', async (request) => {
+  const user = getCurrentUser(request.headers);
+  const { id } = z.object({ id: z.string().trim().min(1) }).parse(request.params);
+  return updateDesignWorkType(user, id, workTypeBody.partial().parse(request.body));
 });
 
 app.get('/api/production-plans/board', async (request) => {
